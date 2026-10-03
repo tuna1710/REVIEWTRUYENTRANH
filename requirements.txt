@@ -1,6 +1,9 @@
 # --- Core Dependencies for Manga Recap AI Studio ---
 # Optimized for Google Colab with NVIDIA T4 GPU
 
+# Web Interface
+gradio>=4.20.0
+
 # Panel Extraction & Computer Vision
 ultralytics>=8.3.0
 opencv-python-headless>=4.9.0
