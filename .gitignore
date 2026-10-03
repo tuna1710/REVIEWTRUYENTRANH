@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Caches and models
+.cache/
+checkpoints/
+*.pt
+*.pth
+*.onnx
+*.bin
+
+# Environment & credentials
+.env
+.venv
+env/
+venv/
+*.pem
+*.key
+
+# Workspace & generated media outputs
+workspace/
+output/
+tmp/
+temp/
+*.mp4
+*.wav
+*.mp3
+*.srt
+*.ass
+*.json
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# OS specific
+.DS_Store
+Thumbs.db

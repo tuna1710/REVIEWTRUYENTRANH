@@ -1,0 +1,31 @@
+# --- Core Dependencies for Manga Recap AI Studio ---
+# Optimized for Google Colab with NVIDIA T4 GPU
+
+# Panel Extraction & Computer Vision
+ultralytics>=8.3.0
+opencv-python-headless>=4.9.0
+pillow>=10.2.0
+
+# Downloader & Web Crawler
+gallery-dl>=1.27.0
+cloudscraper>=1.2.71
+requests>=2.31.0
+
+# LLM & Script Generation
+google-genai>=0.1.1
+pydantic>=2.7.0
+pyyaml>=6.0.1
+tqdm>=4.66.0
+
+# Text-To-Speech (VieNeu-TTS-v3-Turbo) & Subtitles
+vieneu>=3.7.0
+soundfile>=0.12.1
+faster-whisper>=1.0.0
+
+# Optional Open-Source Offline VLM (Qwen2.5-VL 4-bit)
+transformers>=4.48.0
+accelerate>=0.34.0
+bitsandbytes>=0.43.0
+
+# Optional CapCut / JianYing Draft Export
+pyJianYingDraft>=0.1.4

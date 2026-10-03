@@ -1,0 +1,60 @@
+# Manga Recap AI Studio - Configuration File
+project_name: "manga-recap-ai"
+
+# Google Drive Integration (for Colab)
+storage:
+  use_google_drive: true
+  drive_base_dir: "/content/drive/MyDrive/MangaRecap"
+  local_work_dir: "./workspace"
+
+# Downloader Settings
+downloader:
+  default_engine: "gallery-dl" # "gallery-dl" or "local"
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+# Panel Detection Settings
+panel_extractor:
+  model_name: "leoxs22/manga-panel-detector-yolo26n"
+  confidence_threshold: 0.45
+  reading_order: "RTL" # Right-to-Left (Manga style)
+  min_panel_area_ratio: 0.03 # Filter out micro noises
+
+# Script Generation Settings
+script_generator:
+  provider: "gemini" # "gemini" (Free Cloud API) or "qwen_vl" (Local Open-Source 4-bit)
+  gemini_model: "gemini-3.8-flash"
+  target_style: "horror_recap" # Style similar to Quán Khuya
+  max_selected_panels: 35 # Filter 30-40 best dramatic panels per chapter
+  min_drama_score: 7 # Scale 1 to 10
+
+# Text-To-Speech Settings (VieNeu-TTS-v3-Turbo)
+tts:
+  model_id: "pnnbao-ump/VieNeu-TTS-v3-Turbo"
+  voice_preset: "NamMinh" # Options: NamMinh, BacMinh, TrungNam, etc.
+  reference_audio: "" # Path to 3-5s reference audio if voice cloning is desired
+  sample_rate: 48000
+  speed: 1.0
+
+# Subtitle Generation Settings (Faster-Whisper)
+subtitle:
+  model_size: "small" # "small" or "medium"
+  language: "vi"
+  device: "cuda"
+  compute_type: "float16"
+  style: "animated_karaoke" # "animated_karaoke" or "classic_srt"
+
+# Video Engine Settings (FFmpeg)
+video:
+  width: 1920
+  height: 1080
+  fps: 30
+  use_nvenc: true # Hardware accelerated encoding on Colab T4
+  ken_burns:
+    zoom_speed: 0.0015
+    max_zoom: 1.25
+  background:
+    blur_sigma: 20
+    box_blur: 5
+  audio:
+    bgm_volume_db: -18 # Lower BGM volume when narrator speaks
+    ducking_ratio: 0.2
