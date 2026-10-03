@@ -2,7 +2,7 @@
 > **Tự động hóa sản xuất video tóm tắt / review truyện tranh kịch tính, phong cách kinh dị (Quán Khuya Style)**  
 > Tối ưu hóa vận hành trên **Google Colab (GPU NVIDIA Tesla T4 - 16GB VRAM)**, chi phí **0 ĐỒNG** với Google AI Studio Free Tier & Open-Source AI.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/your-username/manga-recap-ai/blob/main/notebooks/Manga_Recap_Colab.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/tuna1710/REVIEWTRUYENTRANH/blob/main/notebooks/Manga_Recap_Colab.ipynb)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
@@ -66,7 +66,7 @@
 
 ### 2. Cài đặt thư viện
 ```bash
-git clone https://github.com/your-username/manga-recap-ai.git
+git clone https://github.com/tuna1710/REVIEWTRUYENTRANH.git
 cd manga-recap-ai
 pip install -r requirements.txt
 ```
