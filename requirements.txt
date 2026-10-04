@@ -33,7 +33,7 @@ av<15.0.0
 # Open-Source Local VLM (Qwen2.5-VL 3B / 7B 4-bit)
 transformers>=4.48.0
 accelerate>=0.34.0
-bitsandbytes>=0.43.0
+bitsandbytes>=0.46.1
 qwen-vl-utils>=0.0.8
 
 # Optional CapCut / JianYing Draft Export

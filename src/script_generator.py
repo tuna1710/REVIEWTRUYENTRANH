@@ -266,8 +266,20 @@ class ScriptGenerator:
             model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_id, **model_kwargs)
             processor = AutoProcessor.from_pretrained(model_id)
         except Exception as e:
-            print(f"[Script Generator] Failed to load {model_id}: {e}. Falling back to simulation...")
-            return self._generate_simulation(panels, synopsis, min_score, max_scenes, note=f"simulation (Load error: {e})")
+            if 'bitsandbytes' in str(e).lower() and 'quantization_config' in model_kwargs:
+                print(f"[Script Generator] 4-bit load failed with bitsandbytes issue: {e}.")
+                print("[Script Generator] Attempting fallback to torch.float16 directly without 4-bit...")
+                try:
+                    fallback_kwargs = {"device_map": "auto", "torch_dtype": torch.float16}
+                    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_id, **fallback_kwargs)
+                    processor = AutoProcessor.from_pretrained(model_id)
+                    print("[Script Generator] Successfully loaded with torch.float16!")
+                except Exception as e2:
+                    print(f"[Script Generator] Both 4-bit and float16 loading failed ({e2}). Please run: pip install -U 'bitsandbytes>=0.46.1'")
+                    return self._generate_simulation(panels, synopsis, min_score, max_scenes, note=f"simulation ({e})")
+            else:
+                print(f"[Script Generator] Failed to load {model_id}: {e}. Falling back to simulation...")
+                return self._generate_simulation(panels, synopsis, min_score, max_scenes, note=f"simulation (Load error: {e})")
 
         # Try to import qwen_vl_utils helper
         try:

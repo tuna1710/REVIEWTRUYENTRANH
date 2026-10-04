@@ -24,11 +24,12 @@ class MangaPanelExtractor:
         self,
         model_name: str = "leoxs22/manga-panel-detector-yolo26n",
         confidence: float = 0.45,
+        confidence_threshold: Optional[float] = None,
         output_dir: str = "./workspace/panels",
         reading_order: str = "RTL"
     ):
         self.model_name = model_name
-        self.confidence = confidence
+        self.confidence = confidence_threshold if confidence_threshold is not None else confidence
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.reading_order = reading_order.upper()
