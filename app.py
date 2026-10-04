@@ -1,18 +1,31 @@
 """
-Manga Recap AI Studio - Gradio Web UI
+Manga Recap AI Studio - Gradio Web UI (Phase 2 Enhanced)
 Giao diện trực quan chạy trực tiếp trên Google Colab GPU T4.
-Hỗ trợ xem trước Panels, nghe thử giọng đọc VieNeu-TTS, chỉnh sửa kịch bản và xem video thành phẩm.
+Bao gồm 2 chế độ:
+- Chế độ 1: ⚡ Tạo Nhanh Tự Động (1-Click Auto Recap)
+- Chế độ 2: 🎬 Đạo Diễn Tương Tác (Studio Director Mode): Xem Gallery panels, chỉnh sửa kịch bản trực tiếp trên bảng, tùy chọn 16:9 / 9:16 Shorts.
 """
 
 import os
 import sys
+import json
+import os
+for _k in ["NO_PROXY", "no_proxy"]:
+    if _k in os.environ and "::1" in os.environ[_k]:
+        os.environ[_k] = os.environ[_k].replace(",[::1]", "").replace(",::1", "").replace("[::1]", "").replace("::1", "")
+
 import yaml
 import shutil
 import zipfile
 from pathlib import Path
+import pandas as pd
 import gradio as gr
 
-# Add project root to sys.path
+# Fix httpx NO_PROXY bug with IPv6 brackets
+for _k in ["NO_PROXY", "no_proxy"]:
+    if _k in os.environ and "::1" in os.environ[_k]:
+        os.environ[_k] = os.environ[_k].replace(",[::1]", "").replace(",::1", "").replace("[::1]", "").replace("::1", "")
+
 BASE_DIR = Path(__file__).parent.resolve()
 sys.path.append(str(BASE_DIR))
 
@@ -26,27 +39,39 @@ from src.capcut_exporter import CapCutExporter
 
 
 def detect_storage_dir(prefer_drive: bool = True) -> Path:
-    """
-    Xác định thư mục lưu trữ:
-    - Nếu chọn Google Drive và Drive đã được mount: lưu vào /content/drive/MyDrive/MangaRecap
-    - Nếu không mount Drive hoặc tắt tùy chọn: lưu cục bộ vào /content/workspace (hoặc ./workspace)
-    """
     drive_path = Path("/content/drive/MyDrive/MangaRecap")
     if prefer_drive and Path("/content/drive/MyDrive").exists():
         drive_path.mkdir(parents=True, exist_ok=True)
         return drive_path
-    
-    # Fallback to local /content/workspace
     local_path = Path("/content/workspace") if Path("/content").exists() else BASE_DIR / "workspace"
     local_path.mkdir(parents=True, exist_ok=True)
     return local_path
 
 
-def process_pipeline(
+# --- VOICE PREVIEW HELPER ---
+def preview_voice_sample(voice_preset: str, ref_audio):
+    ref_audio_path = ref_audio.name if ref_audio is not None else None
+    storage_dir = detect_storage_dir(prefer_drive=False)
+    audio_dir = storage_dir / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    tts = TTSEngine(
+        voice_preset=voice_preset,
+        reference_audio=ref_audio_path,
+        output_dir=str(audio_dir)
+    )
+    sample_text = "Chào mừng bạn đến với Quán Khuya. Đừng bao giờ quay đầu lại nếu bạn nghe thấy tiếng bước chân phía sau..."
+    audio_file = tts.preview_voice(sample_text)
+    return audio_file
+
+
+# --- MODE 1: 1-CLICK AUTO RECAP ---
+def process_auto_pipeline(
     manga_url: str,
     local_file,
     gemini_key: str,
     model_choice: str,
+    aspect_ratio: str,
     synopsis: str,
     voice_preset: str,
     ref_audio,
@@ -75,7 +100,7 @@ def process_pipeline(
         status_log.append(msg)
         return "\n".join(status_log)
 
-    # --- BƯỚC 1: TẢI TRUYỆN ---
+    # 1. Download
     progress(0.1, desc="Đang nạp truyện tranh...")
     log(f"📁 Thư mục lưu trữ: {storage_dir}")
     downloader = MangaDownloader(output_dir=str(raw_dir))
@@ -84,28 +109,24 @@ def process_pipeline(
         log(f"📥 Đang cào ảnh từ URL: {manga_url}")
         pages = downloader.download_from_url(manga_url.strip())
     elif local_file is not None:
-        log(f"📦 Đang giải nén/trích xuất file tải lên: {local_file.name}")
+        log(f"📦 Đang xử lý file tải lên: {local_file.name}")
         pages = downloader.load_from_local_archive(local_file.name)
     else:
         return None, None, None, log("❌ Lỗi: Vui lòng nhập link truyện tranh hoặc tải lên file .zip/.cbz/.pdf!")
 
     if not pages:
         return None, None, None, log("❌ Không tìm thấy trang truyện nào!")
+    log(f"✅ Đã chuẩn bị {len(pages)} trang truyện gốc.")
 
-    log(f"✅ Đã chuẩn bị xong {len(pages)} trang truyện gốc.")
-
-    # --- BƯỚC 2: CẮT PANEL & SẮP XẾP RTL ---
-    progress(0.25, desc="Đang cắt ô tranh bằng AI...")
-    log("✂️ Đang nhận diện ô tranh (YOLO Manga109) & sắp xếp thứ tự đọc Manga (RTL)...")
+    # 2. Extract panels
+    progress(0.25, desc="Đang nhận diện và cắt ô tranh (RTL)...")
     extractor = MangaPanelExtractor(output_dir=str(panels_dir), reading_order="RTL")
     panels_meta = extractor.process_all_pages(pages)
     log(f"✅ Đã cắt thành công {len(panels_meta)} panels ô tranh.")
 
-    # --- BƯỚC 3: GEMINI CHỌN CẢNH & VIẾT KỊCH BẢN ---
+    # 3. AI Scriptwriting
     clean_model_name = model_choice.split(" ")[0].strip() if model_choice else "gemini-3.8-flash"
     progress(0.45, desc=f"Đạo diễn AI ({clean_model_name}) đang viết kịch bản...")
-    log(f"🧠 Đang gửi hình ảnh qua AI ({clean_model_name}) để chấm điểm kịch tính và chọn cảnh đắt giá...")
-    
     api_key_to_use = gemini_key.strip() if gemini_key else os.environ.get("GEMINI_API_KEY", "")
     timeline_file = storage_dir / "timeline.json"
 
@@ -123,20 +144,24 @@ def process_pipeline(
         max_scenes=max_panels
     )
     selected_scenes = timeline.get("scenes", [])
-    log(f"🎬 Đạo diễn AI đã chọn ra {len(selected_scenes)} cảnh cao trào cho video: '{timeline.get('title', '')}'")
+    log(f"🎬 Kịch bản: '{timeline.get('title', '')}' ({len(selected_scenes)} cảnh)")
 
-    # --- BƯỚC 4: GIỌNG ĐỌC VIENEU-TTS & PHỤ ĐỀ WHISPER ---
-    progress(0.65, desc="VieNeu-TTS đang đọc & Faster-Whisper tạo sub...")
+    # 4. TTS & Video Rendering
+    progress(0.65, desc="VieNeu-TTS đang đọc & dựng từng cảnh...")
     ref_audio_path = ref_audio.name if ref_audio is not None else None
     tts = TTSEngine(
         voice_preset=voice_preset,
         reference_audio=ref_audio_path,
         output_dir=str(audio_dir)
     )
-    sub_gen = SubtitleGenerator(output_dir=str(sub_dir))
+    sub_gen = SubtitleGenerator(
+        output_dir=str(sub_dir),
+        aspect_ratio=aspect_ratio
+    )
     video_engine = VideoEngine(
         output_dir=str(scenes_dir),
-        final_output_path=str(final_video_path)
+        final_output_path=str(final_video_path),
+        aspect_ratio=aspect_ratio
     )
 
     rendered_scenes = []
@@ -145,19 +170,13 @@ def process_pipeline(
         if not os.path.exists(panel_file_path):
             continue
 
-        progress(0.65 + 0.25 * (idx / max(1, len(selected_scenes))), desc=f"Xử lý Scene {idx}/{len(selected_scenes)}...")
-        
-        # TTS Audio
+        progress(0.65 + 0.25 * (idx / max(1, len(selected_scenes))), desc=f"Dựng Scene {idx}/{len(selected_scenes)}...")
         audio_info = tts.synthesize_scene(scene_id=idx, text=sc["narration"])
-
-        # Word-level Subtitle
         sub_info = sub_gen.transcribe_and_generate_sub(
             scene_id=idx,
             audio_path=audio_info["audio_path"],
             reference_text=sc["narration"]
         )
-
-        # Render Scene Clip with Ken Burns & NVENC
         motion = camera_motion_style if camera_motion_style != "auto" else sc.get("camera_motion", "zoom_in")
         scene_mp4 = video_engine.render_scene(
             scene_id=idx,
@@ -169,27 +188,26 @@ def process_pipeline(
         )
         rendered_scenes.append(scene_mp4)
 
-    # --- BƯỚC 5: GHÉP VIDEO HOÀN CHỈNH ---
-    progress(0.92, desc="Đang hòa âm & xuất video hoàn chỉnh...")
+    # 5. Concatenate & CapCut
+    progress(0.92, desc="Ghép video & hòa âm BGM...")
     bgm_path = BASE_DIR / "assets" / "bgm" / "eerie_ambient.mp3"
     final_output = video_engine.concatenate_scenes(
         scene_video_paths=rendered_scenes,
         bgm_path=str(bgm_path) if bgm_path.exists() else None
     )
-    log(f"🎉 Video hoàn tất: {final_output}")
+    log(f"🎉 Xuất video hoàn tất ({aspect_ratio}): {final_output}")
 
-    # CapCut Export (nếu chọn)
     capcut_zip_path = None
     if export_capcut_check:
-        log("✂️ Đang đóng gói dự án CapCut Draft...")
+        log("✂️ Đang đóng gói dự án CapCut PC...")
         capcut_exp = CapCutExporter(output_dir=str(draft_dir))
         draft_res = capcut_exp.export_draft(
             timeline_data=timeline,
             panels_dir=str(panels_dir),
-            audio_dir=str(audio_dir)
+            audio_dir=str(audio_dir),
+            aspect_ratio=aspect_ratio
         )
-        # Nén thư mục draft thành file zip để người dùng tải về dễ dàng
-        capcut_zip_path = str(storage_dir / "CapCut_Draft_Project.zip")
+        capcut_zip_path = str(storage_dir / f"CapCut_Draft_{aspect_ratio.replace(':', '_')}.zip")
         with zipfile.ZipFile(capcut_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for root, _, files in os.walk(draft_res):
                 for file in files:
@@ -201,6 +219,187 @@ def process_pipeline(
     return str(final_output), first_audio, capcut_zip_path, "\n".join(status_log)
 
 
+# --- MODE 2: INTERACTIVE STUDIO DIRECTOR ---
+def step1_interactive_extract(manga_url: str, local_file, progress=gr.Progress(track_tqdm=True)):
+    storage_dir = detect_storage_dir(prefer_drive=False)
+    raw_dir = storage_dir / "raw_pages"
+    panels_dir = storage_dir / "panels"
+    for d in [raw_dir, panels_dir]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    downloader = MangaDownloader(output_dir=str(raw_dir))
+    if manga_url and manga_url.strip().startswith("http"):
+        pages = downloader.download_from_url(manga_url.strip())
+    elif local_file is not None:
+        pages = downloader.load_from_local_archive(local_file.name)
+    else:
+        return [], "❌ Vui lòng nhập link hoặc upload file .zip/.cbz/.pdf!", ""
+
+    extractor = MangaPanelExtractor(output_dir=str(panels_dir), reading_order="RTL")
+    panels_meta = extractor.process_all_pages(pages)
+
+    gallery_items = [p["file_path"] for p in panels_meta]
+    panels_json = json.dumps(panels_meta, ensure_ascii=False)
+    status = f"✅ Đã trích xuất thành công {len(panels_meta)} ô tranh theo thứ tự đọc Manga (RTL)!"
+    return gallery_items, status, panels_json
+
+
+def step2_interactive_generate_script(
+    panels_json_str: str,
+    gemini_key: str,
+    model_choice: str,
+    synopsis: str,
+    dramatic_threshold: int,
+    max_panels: int,
+    progress=gr.Progress(track_tqdm=True)
+):
+    if not panels_json_str:
+        return "", "", pd.DataFrame(), "❌ Hãy hoàn thành Bước 1 (Trích xuất ô tranh) trước!"
+
+    panels_meta = json.loads(panels_json_str)
+    storage_dir = detect_storage_dir(prefer_drive=False)
+    timeline_file = storage_dir / "timeline.json"
+
+    clean_model_name = model_choice.split(" ")[0].strip() if model_choice else "gemini-3.8-flash"
+    api_key_to_use = gemini_key.strip() if gemini_key else os.environ.get("GEMINI_API_KEY", "")
+
+    script_gen = ScriptGenerator(
+        provider="gemini" if api_key_to_use else "qwen_vl",
+        api_key=api_key_to_use,
+        model_name=clean_model_name,
+        output_file=str(timeline_file)
+    )
+
+    timeline = script_gen.generate_timeline(
+        panels_metadata=panels_meta,
+        story_synopsis=synopsis,
+        min_score=dramatic_threshold,
+        max_scenes=max_panels
+    )
+
+    rows = []
+    for sc in timeline.get("scenes", []):
+        rows.append({
+            "Khung Tranh": sc.get("panel_file", ""),
+            "Điểm Kịch Tính": sc.get("dramatic_score", 8),
+            "Lời Bình Dẫn Chuyện (Có thể sửa)": sc.get("narration", ""),
+            "Camera Motion": sc.get("camera_motion", "zoom_in"),
+            "Âm Thanh SFX": sc.get("sfx_cue", "heart_beat")
+        })
+
+    df = pd.DataFrame(rows)
+    return (
+        timeline.get("title", "Kịch Bản Review Truyện"),
+        timeline.get("intro_hook", "Mở đầu kịch tính..."),
+        df,
+        f"✅ AI đã hoàn tất phân tích và chọn {len(rows)} cảnh đắt giá. Bạn có thể sửa trực tiếp bảng dưới đây!"
+    )
+
+
+def step3_interactive_render(
+    edited_df: pd.DataFrame,
+    video_title: str,
+    intro_hook: str,
+    aspect_ratio: str,
+    voice_preset: str,
+    ref_audio,
+    export_capcut: bool,
+    progress=gr.Progress(track_tqdm=True)
+):
+    if edited_df is None or edited_df.empty:
+        return None, None, "❌ Chưa có nội dung kịch bản để dựng video!"
+
+    storage_dir = detect_storage_dir(prefer_drive=False)
+    panels_dir = storage_dir / "panels"
+    audio_dir = storage_dir / "audio"
+    sub_dir = storage_dir / "subtitles"
+    scenes_dir = storage_dir / "rendered_scenes"
+    final_video_path = storage_dir / "final_recap_video.mp4"
+    draft_dir = storage_dir / "capcut_draft"
+
+    for d in [audio_dir, sub_dir, scenes_dir]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    # Reconstruct timeline from edited dataframe
+    scenes = []
+    for _, row in edited_df.iterrows():
+        scenes.append({
+            "panel_file": str(row.get("Khung Tranh", "")),
+            "dramatic_score": int(row.get("Điểm Kịch Tính", 8)),
+            "narration": str(row.get("Lời Bình Dẫn Chuyện (Có thể sửa)", "")),
+            "camera_motion": str(row.get("Camera Motion", "zoom_in")),
+            "sfx_cue": str(row.get("Âm Thanh SFX", "none"))
+        })
+
+    timeline_data = {
+        "title": video_title,
+        "intro_hook": intro_hook,
+        "total_scenes": len(scenes),
+        "scenes": scenes
+    }
+
+    ref_audio_path = ref_audio.name if ref_audio is not None else None
+    tts = TTSEngine(
+        voice_preset=voice_preset,
+        reference_audio=ref_audio_path,
+        output_dir=str(audio_dir)
+    )
+    sub_gen = SubtitleGenerator(output_dir=str(sub_dir), aspect_ratio=aspect_ratio)
+    video_engine = VideoEngine(
+        output_dir=str(scenes_dir),
+        final_output_path=str(final_video_path),
+        aspect_ratio=aspect_ratio
+    )
+
+    rendered_scenes = []
+    for idx, sc in enumerate(scenes, start=1):
+        panel_file_path = str(panels_dir / sc["panel_file"])
+        if not os.path.exists(panel_file_path):
+            continue
+
+        progress(0.2 + 0.7 * (idx / max(1, len(scenes))), desc=f"Đang dựng Scene {idx}/{len(scenes)}...")
+        audio_info = tts.synthesize_scene(scene_id=idx, text=sc["narration"])
+        sub_info = sub_gen.transcribe_and_generate_sub(
+            scene_id=idx,
+            audio_path=audio_info["audio_path"],
+            reference_text=sc["narration"]
+        )
+        scene_mp4 = video_engine.render_scene(
+            scene_id=idx,
+            panel_path=panel_file_path,
+            audio_path=audio_info["audio_path"],
+            sub_ass_path=sub_info["ass_path"],
+            camera_motion=sc.get("camera_motion", "zoom_in"),
+            duration=audio_info["duration"]
+        )
+        rendered_scenes.append(scene_mp4)
+
+    bgm_path = BASE_DIR / "assets" / "bgm" / "eerie_ambient.mp3"
+    final_output = video_engine.concatenate_scenes(
+        scene_video_paths=rendered_scenes,
+        bgm_path=str(bgm_path) if bgm_path.exists() else None
+    )
+
+    capcut_zip_path = None
+    if export_capcut:
+        capcut_exp = CapCutExporter(output_dir=str(draft_dir))
+        draft_res = capcut_exp.export_draft(
+            timeline_data=timeline_data,
+            panels_dir=str(panels_dir),
+            audio_dir=str(audio_dir),
+            aspect_ratio=aspect_ratio
+        )
+        capcut_zip_path = str(storage_dir / f"CapCut_Custom_{aspect_ratio.replace(':', '_')}.zip")
+        with zipfile.ZipFile(capcut_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, _, files in os.walk(draft_res):
+                for file in files:
+                    file_p = Path(root) / file
+                    zipf.write(file_p, arcname=file_p.relative_to(Path(draft_res).parent))
+
+    return str(final_output), capcut_zip_path, f"🎉 Đã dựng xong video hoàn chỉnh từ kịch bản bạn chỉnh sửa ({aspect_ratio})!"
+
+
+# --- GRADIO INTERFACE LAYOUT ---
 def create_ui():
     custom_theme = gr.themes.Soft(
         primary_hue="red",
@@ -208,133 +407,212 @@ def create_ui():
         font=[gr.themes.GoogleFont("Inter"), "sans-serif"]
     )
 
-    with gr.Blocks(theme=custom_theme, title="Manga Recap AI Studio") as demo:
+    with gr.Blocks(title="Manga Recap AI Studio - Phase 2") as demo:
         gr.Markdown(
             """
             # 🎬 Manga Recap AI Studio
-            ### Hệ thống dựng Video Tóm tắt / Review Truyện tranh Kịch tính (Phong cách *Quán Khuya*)
-            *Tối ưu hóa chạy trơn tru trên **Google Colab GPU T4 (16GB VRAM)** | Chi phí **0 ĐỒNG***
+            ### Xưởng Dựng Video Tóm Tắt Truyện Tranh Bằng AI (Phong Cách *Quán Khuya*)
+            *Tối ưu cho Google Colab GPU T4 | Hỗ trợ Video Ngang YouTube 16:9 & Dọc TikTok/Shorts 9:16*
             """
         )
 
-        with gr.Row():
-            with gr.Column(scale=5):
-                with gr.Group():
-                    gr.Markdown("### 📥 1. Đầu Vào Truyện Tranh")
-                    input_url = gr.Textbox(
-                        label="Link Web Truyện Online",
-                        placeholder="https://mangadex.org/chapter/... hoặc link web truyện bất kỳ",
-                        lines=1
-                    )
-                    local_archive = gr.File(
-                        label="HOẶC Tải lên file .zip / .cbz / .pdf từ máy tính",
-                        file_types=[".zip", ".cbz", ".pdf"]
-                    )
+        with gr.Tabs():
+            # --- TAB 1: TẠO NHANH ---
+            with gr.TabItem("⚡ 1-Click Auto Recap (Tự Động Trọn Gói)"):
+                with gr.Row():
+                    with gr.Column(scale=5):
+                        with gr.Group():
+                            gr.Markdown("### 📥 1. Nguồn Truyện Tranh")
+                            auto_url = gr.Textbox(
+                                label="Link Chương Truyện Online",
+                                placeholder="https://mangadex.org/chapter/... hoặc trang truyện bất kỳ",
+                                lines=1
+                            )
+                            auto_file = gr.File(
+                                label="HOẶC Tải lên file .zip / .cbz / .pdf từ máy",
+                                file_types=[".zip", ".cbz", ".pdf"]
+                            )
 
-                with gr.Group():
-                    gr.Markdown("### 🧠 2. Đạo Diễn AI (Google Gemini)")
+                        with gr.Group():
+                            gr.Markdown("### 🧠 2. Cấu Hình Đạo Diễn AI")
+                            with gr.Row():
+                                auto_model = gr.Dropdown(
+                                    label="Gemini Model",
+                                    choices=[
+                                        "gemini-3.8-flash (Tối ưu nhất - Gemini 3)",
+                                        "gemini-3.5-flash-lite (Siêu tốc & Tiết kiệm)",
+                                        "gemini-2.5-flash (Thế hệ trước)"
+                                    ],
+                                    value="gemini-3.8-flash (Tối ưu nhất - Gemini 3)"
+                                )
+                                auto_aspect = gr.Dropdown(
+                                    label="Định Dạng Video",
+                                    choices=["16:9 (YouTube Ngang - 1920x1080)", "9:16 (Shorts/TikTok Dọc - 1080x1920)"],
+                                    value="16:9 (YouTube Ngang - 1920x1080)"
+                                )
+
+                            auto_gemini_key = gr.Textbox(
+                                label="Gemini API Key (Miễn phí tại aistudio.google.com)",
+                                placeholder="Để trống nếu đã cài trong môi trường",
+                                type="password"
+                            )
+                            auto_synopsis = gr.Textbox(
+                                label="Gợi ý cốt truyện / tông giọng",
+                                value="Một vụ án kinh hoàng lúc nửa đêm, không khí căng thẳng, u ám, giọng kể rùng rợn và kích thích tò mò.",
+                                lines=2
+                            )
+                            with gr.Row():
+                                auto_drama = gr.Slider(minimum=5, maximum=10, value=7, step=1, label="Điểm kịch tính tối thiểu")
+                                auto_max_p = gr.Slider(minimum=10, maximum=60, value=35, step=5, label="Số khung tranh tối đa")
+
+                        with gr.Group():
+                            gr.Markdown("### 🎙️ 3. Giọng Kể Chuyện & Hiệu Ứng")
+                            with gr.Row():
+                                auto_voice = gr.Dropdown(
+                                    label="Giọng Đọc VieNeu-TTS (48kHz)",
+                                    choices=["NamMinh (Trầm ấm - Kịch tính)", "BacMinh (Rõ ràng - Truyền cảm)", "TrungNam (Bí ẩn)"],
+                                    value="NamMinh (Trầm ấm - Kịch tính)"
+                                )
+                                auto_camera = gr.Dropdown(
+                                    label="Hiệu Ứng Chuyển Động Camera",
+                                    choices=["auto", "zoom_in", "zoom_out", "pan_left"],
+                                    value="auto"
+                                )
+                            with gr.Row():
+                                btn_preview_voice = gr.Button("🔊 Nghe Thử Voice Mẫu", size="sm")
+                                voice_preview_player = gr.Audio(label="Nghe thử giọng", interactive=False)
+
+                            auto_ref_audio = gr.Audio(label="Clone giọng (mẫu audio 3-5s - Tùy chọn)", type="filepath")
+
+                        with gr.Group():
+                            gr.Markdown("### ⚙️ 4. Xuất Bản & Lưu Trữ")
+                            with gr.Row():
+                                auto_drive = gr.Checkbox(label="Lưu vào Google Drive", value=True)
+                                auto_capcut = gr.Checkbox(label="Xuất file CapCut PC (.zip)", value=True)
+
+                        btn_run_auto = gr.Button("🚀 BẮT ĐẦU TẠO VIDEO (1-CLICK)", variant="primary", size="lg")
+
+                    with gr.Column(scale=5):
+                        gr.Markdown("### 📺 Video Thành Phẩm")
+                        auto_video_out = gr.Video(label="Video Recap Hoàn Chỉnh")
+                        with gr.Row():
+                            auto_audio_out = gr.Audio(label="Voice Scene 1", type="filepath")
+                            auto_capcut_out = gr.File(label="Tải Gói Dự Án CapCut (.zip)")
+                        auto_logs = gr.Textbox(label="Nhật Ký Tiến Trình", lines=12, interactive=False)
+
+                # Event bindings for Tab 1
+                def _wrap_aspect(val):
+                    return "9:16" if "9:16" in val else "16:9"
+
+                btn_preview_voice.click(
+                    fn=preview_voice_sample,
+                    inputs=[auto_voice, auto_ref_audio],
+                    outputs=[voice_preview_player]
+                )
+                btn_run_auto.click(
+                    fn=lambda u, f, k, m, asp, s, v, r, d, mp, cam, cap, drv: process_auto_pipeline(
+                        u, f, k, m, _wrap_aspect(asp), s, v, r, d, mp, cam, cap, drv
+                    ),
+                    inputs=[
+                        auto_url, auto_file, auto_gemini_key, auto_model, auto_aspect,
+                        auto_synopsis, auto_voice, auto_ref_audio, auto_drama, auto_max_p,
+                        auto_camera, auto_capcut, auto_drive
+                    ],
+                    outputs=[auto_video_out, auto_audio_out, auto_capcut_out, auto_logs]
+                )
+
+            # --- TAB 2: ĐẠO DIỄN TƯƠNG TÁC (STUDIO DIRECTOR) ---
+            with gr.TabItem("🎬 Studio Director Mode (Xem Panels & Sửa Kịch Bản)"):
+                gr.Markdown("#### Quy trình 3 bước chuyên nghiệp: Trích xuất tranh ➔ AI đề xuất kịch bản & Bạn chỉnh sửa ➔ Dựng video")
+                
+                # Hidden state storing panels JSON
+                stored_panels_state = gr.State("")
+
+                with gr.Accordion("📌 Bước 1: Nạp Truyện Tranh & Xem Thư Viện Panels (RTL)", open=True):
                     with gr.Row():
-                        model_choice = gr.Dropdown(
-                            label="Phiên bản Gemini Model",
-                            choices=[
-                                "gemini-3.8-flash (Tối ưu nhất - Gemini 3)",
-                                "gemini-3.5-flash-lite (Siêu tốc & Tiết kiệm)",
-                                "gemini-2.5-flash (Thế hệ trước)"
-                            ],
-                            value="gemini-3.8-flash (Tối ưu nhất - Gemini 3)"
+                        dir_url = gr.Textbox(label="Link Truyện Online", placeholder="URL chương truyện...", scale=3)
+                        dir_file = gr.File(label="Tải file .zip / .cbz / .pdf", file_types=[".zip", ".cbz", ".pdf"], scale=2)
+                    btn_step1 = gr.Button("✂️ BÓC TÁCH KHUNG TRANH (YOLO Manga109)", variant="secondary")
+                    step1_status = gr.Markdown("")
+                    panels_gallery = gr.Gallery(label="Bộ sưu tập khung tranh đã bóc tách (Thứ tự đọc Manga RTL)", columns=6, height="auto")
+
+                with gr.Accordion("📝 Bước 2: AI Đạo Diễn & Chỉnh Sửa Kịch Bản Trực Tiếp", open=True):
+                    with gr.Row():
+                        dir_model = gr.Dropdown(
+                            label="Model Gemini",
+                            choices=["gemini-3.8-flash (Tối ưu)", "gemini-3.5-flash-lite", "gemini-2.5-flash"],
+                            value="gemini-3.8-flash (Tối ưu)"
                         )
-                    gemini_api_key = gr.Textbox(
-                        label="Google Gemini API Key (Miễn phí 100% tại aistudio.google.com)",
-                        placeholder="Để trống nếu đã cài trong Colab Secrets hoặc dùng Offline Qwen-VL",
-                        type="password"
-                    )
-                    synopsis_input = gr.Textbox(
-                        label="Gợi ý Cốt truyện / Phong cách dẫn dắt",
-                        value="Một vụ án kinh hoàng lúc nửa đêm, không khí căng thẳng, u ám, giọng kể rùng rợn và kích thích tò mò.",
+                        dir_key = gr.Textbox(label="Gemini API Key", placeholder="Để trống nếu có env key", type="password")
+                        dir_drama = gr.Slider(minimum=5, maximum=10, value=7, step=1, label="Điểm kịch tính tối thiểu")
+                        dir_max_p = gr.Slider(minimum=10, maximum=50, value=25, step=5, label="Số cảnh tối đa")
+
+                    dir_synopsis = gr.Textbox(
+                        label="Chỉ dẫn cốt truyện & phong cách kịch bản",
+                        value="Giọng kể Quán Khuya rùng rợn, nhấn mạnh sự bí ẩn, từng khung tranh như một câu đố chết người.",
                         lines=2
                     )
-                    with gr.Row():
-                        drama_slider = gr.Slider(
-                            minimum=5, maximum=10, value=7, step=1,
-                            label="Độ kịch tính tối thiểu (Chỉ chọn cảnh điểm >= giá trị này)"
-                        )
-                        max_panels_slider = gr.Slider(
-                            minimum=10, maximum=60, value=35, step=5,
-                            label="Số khung tranh tối đa trong 1 video"
-                        )
+                    btn_step2 = gr.Button("🧠 TẠO KỊCH BẢN ĐỀ XUẤT", variant="secondary")
+                    step2_status = gr.Markdown("")
 
-                with gr.Group():
-                    gr.Markdown("### 🎙️ 3. Giọng Đọc VieNeu-TTS-v3-Turbo (48kHz)")
                     with gr.Row():
-                        voice_choice = gr.Dropdown(
-                            label="Giọng đọc kể chuyện",
+                        script_title = gr.Textbox(label="Tiêu Đề Video (YouTube Title)", scale=3)
+                        script_intro = gr.Textbox(label="Intro Hook Mở Đầu", scale=3)
+
+                    gr.Markdown("##### ✏️ Bảng Kịch Bản (Bạn có thể nhấn đúp vào ô để sửa lời bình, đổi camera motion hoặc SFX):")
+                    script_table = gr.Dataframe(
+                        headers=["Khung Tranh", "Điểm Kịch Tính", "Lời Bình Dẫn Chuyện (Có thể sửa)", "Camera Motion", "Âm Thanh SFX"],
+                        datatype=["str", "number", "str", "str", "str"],
+                        interactive=True,
+                        wrap=True
+                    )
+
+                with gr.Accordion("🎥 Bước 3: Dựng Video & Xuất CapCut Từ Kịch Bản Đã Sửa", open=True):
+                    with gr.Row():
+                        dir_aspect = gr.Dropdown(
+                            label="Định Dạng Video",
+                            choices=["16:9 (YouTube Ngang - 1920x1080)", "9:16 (Shorts/TikTok Dọc - 1080x1920)"],
+                            value="16:9 (YouTube Ngang - 1920x1080)"
+                        )
+                        dir_voice = gr.Dropdown(
+                            label="Giọng Đọc Kể Chuyện",
                             choices=["NamMinh (Trầm ấm - Kịch tính)", "BacMinh (Rõ ràng - Truyền cảm)", "TrungNam (Bí ẩn)"],
                             value="NamMinh (Trầm ấm - Kịch tính)"
                         )
-                        camera_motion = gr.Dropdown(
-                            label="Hiệu ứng Camera (Ken Burns)",
-                            choices=["auto", "zoom_in", "zoom_out", "pan_left"],
-                            value="auto"
-                        )
-                    ref_audio_input = gr.Audio(
-                        label="Nhái giọng (Instant Voice Cloning) - Tải lên mẫu audio 3-5 giây (Tùy chọn)",
-                        type="filepath"
-                    )
+                        dir_capcut = gr.Checkbox(label="Xuất CapCut PC Project (.zip)", value=True)
 
-                with gr.Group():
-                    gr.Markdown("### ⚙️ 4. Tùy Chọn Xuất Video & Lưu Trữ")
+                    btn_step3 = gr.Button("🎬 BẮT ĐẦU DỰNG VIDEO THÀNH PHẨM", variant="primary", size="lg")
+                    step3_status = gr.Markdown("")
+
                     with gr.Row():
-                        save_drive = gr.Checkbox(
-                            label="Lưu vào Google Drive (nếu đã mount)",
-                            value=True,
-                            info="Nếu tắt hoặc chưa mount Drive, video sẽ lưu an toàn trong thư mục /content cục bộ"
-                        )
-                        export_capcut = gr.Checkbox(
-                            label="Xuất gói dự án CapCut PC (.zip)",
-                            value=True,
-                            info="Mở file trên CapCut PC để chỉnh sửa chuyển cảnh hoặc thêm sticker"
-                        )
+                        dir_video_out = gr.Video(label="Video Thành Phẩm Hoàn Chỉnh")
+                        dir_capcut_out = gr.File(label="Tải Dự Án CapCut PC (.zip)")
 
-                btn_generate = gr.Button("🚀 BẮT ĐẦU TẠO VIDEO RECAP", variant="primary", size="lg")
-
-            with gr.Column(scale=5):
-                gr.Markdown("### 📺 Kết Quả Thành Phẩm")
-                video_output = gr.Video(label="Video Recap Hoàn Chỉnh (1080p)")
-                
-                with gr.Row():
-                    audio_preview = gr.Audio(label="Nghe thử Voice AI mẫu (Scene 1)", type="filepath")
-                    capcut_download = gr.File(label="Tải về File Dự Án CapCut (.zip)")
-
-                gr.Markdown("### 📜 Tiến Trình Thực Thi")
-                log_box = gr.Textbox(
-                    label="Nhật ký hệ thống (Console Logs)",
-                    lines=14,
-                    interactive=False
+                # Event bindings for Tab 2
+                btn_step1.click(
+                    fn=step1_interactive_extract,
+                    inputs=[dir_url, dir_file],
+                    outputs=[panels_gallery, step1_status, stored_panels_state]
                 )
 
-        btn_generate.click(
-            fn=process_pipeline,
-            inputs=[
-                input_url,
-                local_archive,
-                gemini_api_key,
-                model_choice,
-                synopsis_input,
-                voice_choice,
-                ref_audio_input,
-                drama_slider,
-                max_panels_slider,
-                camera_motion,
-                export_capcut,
-                save_drive
-            ],
-            outputs=[video_output, audio_preview, capcut_download, log_box]
-        )
+                btn_step2.click(
+                    fn=step2_interactive_generate_script,
+                    inputs=[stored_panels_state, dir_key, dir_model, dir_synopsis, dir_drama, dir_max_p],
+                    outputs=[script_title, script_intro, script_table, step2_status]
+                )
+
+                btn_step3.click(
+                    fn=lambda df, t, i, asp, v, cap: step3_interactive_render(
+                        df, t, i, _wrap_aspect(asp), v, None, cap
+                    ),
+                    inputs=[script_table, script_title, script_intro, dir_aspect, dir_voice, dir_capcut],
+                    outputs=[dir_video_out, dir_capcut_out, step3_status]
+                )
 
         gr.Markdown(
             """
             ---
-            *Manga Recap AI Studio - Thiết kế cho Google Colab GPU T4.*
+            *Manga Recap AI Studio - Phiên bản 2.0 (Hỗ trợ Đạo Diễn Tương Tác & Đa Tỉ Lệ 16:9 / 9:16)*
             """
         )
 
@@ -343,5 +621,4 @@ def create_ui():
 
 if __name__ == "__main__":
     demo = create_ui()
-    # launch with share=True on Colab to provide a public URL
-    demo.launch(share=True, debug=True)
+    demo.launch(theme=custom_theme, share=True, debug=True)

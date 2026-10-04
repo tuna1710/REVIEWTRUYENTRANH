@@ -45,6 +45,7 @@ subtitle:
 
 # Video Engine Settings (FFmpeg)
 video:
+  aspect_ratio: "16:9" # "16:9" (YouTube 1920x1080) or "9:16" (TikTok/Shorts 1080x1920)
   width: 1920
   height: 1080
   fps: 30

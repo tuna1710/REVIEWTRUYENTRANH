@@ -2,6 +2,7 @@
 Module 5A: Video Assembly Engine (FFmpeg with NVENC Hardware Acceleration)
 Creates cinematic 1080p video clips with Ken Burns camera motion, blurred background filler,
 subtitles, sound effects, and mixes with ducked ambient horror BGM.
+Supports both 16:9 Landscape (YouTube) and 9:16 Portrait (TikTok/Shorts/Reels).
 """
 
 import os
@@ -17,17 +18,29 @@ class VideoEngine:
         self,
         output_dir: str = "./workspace/rendered_scenes",
         final_output_path: str = "./workspace/final_recap_video.mp4",
+        aspect_ratio: str = "16:9",
         use_nvenc: bool = True,
-        width: int = 1920,
-        height: int = 1080,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
         fps: int = 30
     ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.final_output_path = Path(final_output_path)
+        self.aspect_ratio = aspect_ratio
+        
+        # Determine resolution based on aspect ratio
+        if width is not None and height is not None:
+            self.width = width
+            self.height = height
+        elif aspect_ratio == "9:16":
+            self.width = 1080
+            self.height = 1920
+        else:
+            self.width = 1920
+            self.height = 1080
+
         self.use_nvenc = use_nvenc
-        self.width = width
-        self.height = height
         self.fps = fps
         self.encoder = self._detect_encoder()
 
@@ -83,7 +96,7 @@ class VideoEngine:
             x_expr = "iw/2-(iw/zoom/2)"
             y_expr = "ih/2-(ih/zoom/2)"
         elif camera_motion == "zoom_out":
-            zoom_expr = f"max(1.25-0.0015*on,1.0)"
+            zoom_expr = "max(1.25-0.0015*on,1.0)"
             x_expr = "iw/2-(iw/zoom/2)"
             y_expr = "ih/2-(ih/zoom/2)"
         elif camera_motion == "pan_left":
@@ -168,7 +181,7 @@ class VideoEngine:
         """
         Concatenates all scene MP4 files and blends background music (BGM).
         """
-        print(f"[Video Engine] Stitching {len(scene_video_paths)} scene clips into final recap video...")
+        print(f"[Video Engine] Stitching {len(scene_video_paths)} scene clips ({self.aspect_ratio}) into final video...")
         concat_txt = self.output_dir / "concat_list.txt"
         with open(concat_txt, "w", encoding="utf-8") as f:
             for p in scene_video_paths:

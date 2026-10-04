@@ -1,6 +1,7 @@
 """
 Main Orchestration Pipeline for Manga Recap AI Studio
 Coordinates all steps: Download -> Panel Extract -> AI Script -> TTS + Subtitle -> Video Render / CapCut Export.
+Supports both 16:9 Landscape (YouTube) and 9:16 Portrait (TikTok/Shorts/Reels).
 """
 
 import os
@@ -33,10 +34,12 @@ def run_pipeline(
     voice_preset: str = "NamMinh",
     reference_audio: str = None,
     export_capcut: bool = False,
+    aspect_ratio: str = "16:9",
     config_path: str = "config.yaml"
 ):
     print("=" * 60)
     print("🔥 MANGA RECAP AI STUDIO - AUTOMATED RECAP PIPELINE 🔥")
+    print(f"🎬 Target Aspect Ratio: {aspect_ratio}")
     print("=" * 60)
 
     # 1. Load Configurations
@@ -95,12 +98,16 @@ def run_pipeline(
         reference_audio=reference_audio,
         output_dir=str(work_dir / "audio")
     )
-    sub_gen = SubtitleGenerator(output_dir=str(work_dir / "subtitles"))
+    sub_gen = SubtitleGenerator(
+        output_dir=str(work_dir / "subtitles"),
+        aspect_ratio=aspect_ratio
+    )
 
     rendered_scene_videos = []
     video_engine = VideoEngine(
         output_dir=str(work_dir / "rendered_scenes"),
-        final_output_path=str(work_dir / "final_recap_video.mp4")
+        final_output_path=str(work_dir / f"final_recap_video_{aspect_ratio.replace(':', '_')}.mp4"),
+        aspect_ratio=aspect_ratio
     )
 
     scenes = timeline.get("scenes", [])
@@ -144,7 +151,8 @@ def run_pipeline(
         draft_path = capcut_exp.export_draft(
             timeline_data=timeline,
             panels_dir=str(work_dir / "panels"),
-            audio_dir=str(work_dir / "audio")
+            audio_dir=str(work_dir / "audio"),
+            aspect_ratio=aspect_ratio
         )
         print(f"✅ CapCut draft saved at: {draft_path}")
 
@@ -161,6 +169,7 @@ if __name__ == "__main__":
     parser.add_argument("--voice", default="NamMinh", help="TTS voice preset")
     parser.add_argument("--ref-audio", default=None, help="Audio file for voice cloning")
     parser.add_argument("--capcut", action="store_true", help="Also export CapCut draft")
+    parser.add_argument("--aspect-ratio", default="16:9", choices=["16:9", "9:16"], help="Video aspect ratio: 16:9 or 9:16")
     args = parser.parse_args()
 
     run_pipeline(
@@ -169,5 +178,6 @@ if __name__ == "__main__":
         story_synopsis=args.synopsis,
         voice_preset=args.voice,
         reference_audio=args.ref_audio,
-        export_capcut=args.capcut
+        export_capcut=args.capcut,
+        aspect_ratio=args.aspect_ratio
     )

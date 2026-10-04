@@ -40,6 +40,37 @@ class TTSEngine:
             except Exception as e:
                 print(f"[TTS Engine] Notice initializing VieNeu: {e}")
 
+    def preview_voice(self, sample_text: str = "Chào mừng bạn đến với Quán Khuya, nơi những câu chuyện rùng rợn bắt đầu...") -> str:
+        """
+        Quick voice audition without rendering full chapter scenes.
+        """
+        preview_path = self.output_dir / "voice_sample_preview.wav"
+        print(f"[TTS Engine] Synthesizing preview audition: \"{sample_text[:40]}...\"")
+        if self.engine is not None:
+            try:
+                clean_voice = self.voice_preset.split(" ")[0].strip()
+                if self.reference_audio and os.path.exists(self.reference_audio):
+                    result = self.engine.infer(text=sample_text, ref_audio=self.reference_audio, denoise=True)
+                else:
+                    result = self.engine.infer(text=sample_text, voice=clean_voice)
+
+                if isinstance(result, tuple) and len(result) == 2:
+                    audio_array, sr = result
+                else:
+                    audio_array = result
+                    sr = getattr(self.engine, "sample_rate", self.sample_rate)
+
+                if hasattr(self.engine, "save"):
+                    self.engine.save(audio_array, str(preview_path))
+                else:
+                    sf.write(str(preview_path), audio_array, sr)
+                return str(preview_path)
+            except Exception as e:
+                print(f"[TTS Engine] VieNeu preview notice: {e}, falling back to edge-tts...")
+
+        self._fallback_edge_tts(sample_text, str(preview_path))
+        return str(preview_path)
+
     def synthesize_scene(self, scene_id: int, text: str) -> Dict:
         """
         Synthesizes speech for a single scene and returns the audio path and duration.

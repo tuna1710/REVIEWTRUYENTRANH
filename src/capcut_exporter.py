@@ -2,6 +2,7 @@
 Module 5B: CapCut / JianYing Draft Exporter
 Exports timeline JSON, images, audio, and subtitles directly into a CapCut PC Project folder.
 Users can unzip directly into their CapCut Projects folder to edit transitions, text, and effects.
+Supports both 16:9 Landscape and 9:16 Portrait canvas modes.
 """
 
 import os
@@ -24,7 +25,8 @@ class CapCutExporter:
         timeline_data: Dict,
         panels_dir: str,
         audio_dir: str,
-        subtitles_data: Optional[List[Dict]] = None
+        subtitles_data: Optional[List[Dict]] = None,
+        aspect_ratio: str = "16:9"
     ) -> str:
         """
         Generates standard CapCut/JianYing draft folder containing draft_content.json and draft_meta_info.json.
@@ -37,7 +39,14 @@ class CapCutExporter:
         materials_dir = draft_root / "materials"
         materials_dir.mkdir(exist_ok=True)
 
-        print(f"[CapCut Exporter] Building CapCut project draft '{draft_name}' in: {draft_root}...")
+        if aspect_ratio == "9:16":
+            canvas_w, canvas_h = 1080, 1920
+            ratio_str = "9:16"
+        else:
+            canvas_w, canvas_h = 1920, 1080
+            ratio_str = "16:9"
+
+        print(f"[CapCut Exporter] Building CapCut project draft '{draft_name}' ({ratio_str}) in: {draft_root}...")
 
         materials_videos = []
         materials_audios = []
@@ -86,8 +95,8 @@ class CapCutExporter:
                 "id": img_mat_id,
                 "path": str(dst_panel.resolve()),
                 "type": "photo",
-                "width": 1920,
-                "height": 1080
+                "width": canvas_w,
+                "height": canvas_h
             })
             tracks[0]["segments"].append({
                 "id": str(uuid.uuid4()).upper(),
@@ -131,7 +140,7 @@ class CapCutExporter:
         # Build draft_content.json
         draft_content = {
             "id": draft_id,
-            "canvas_config": {"width": 1920, "height": 1080, "ratio": "16:9"},
+            "canvas_config": {"width": canvas_w, "height": canvas_h, "ratio": ratio_str},
             "duration": current_time_us,
             "fps": 30.0,
             "materials": {

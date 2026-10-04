@@ -1,6 +1,7 @@
 """
 Module 4B: Subtitle Engine (Faster-Whisper)
 Extracts word-level timestamps from synthesized audio and generates dynamic .srt / .ass subtitles.
+Supports both 16:9 Landscape (YouTube) and 9:16 Portrait (TikTok/Shorts/Reels).
 """
 
 import os
@@ -20,10 +21,12 @@ class SubtitleGenerator:
         model_size: str = "small",
         device: str = "cuda",
         compute_type: str = "float16",
-        output_dir: str = "./workspace/subtitles"
+        output_dir: str = "./workspace/subtitles",
+        aspect_ratio: str = "16:9"
     ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.aspect_ratio = aspect_ratio
         self.model = None
 
         if HAS_WHISPER:
@@ -63,7 +66,6 @@ class SubtitleGenerator:
                             "end": word.end
                         })
 
-                    # Build standard SRT block
                     start_str = self._format_timestamp_srt(segment.start)
                     end_str = self._format_timestamp_srt(segment.end)
                     srt_entries.append(f"{counter}\n{start_str} --> {end_str}\n{segment.text.strip()}\n")
@@ -78,7 +80,7 @@ class SubtitleGenerator:
         else:
             self._write_simple_srt(out_srt, reference_text, duration=5.0)
 
-        # Generate stylized ASS subtitle
+        # Generate stylized ASS subtitle tailored to aspect ratio
         self._generate_stylized_ass(out_ass, words_data, fallback_text=reference_text)
 
         return {
@@ -109,27 +111,37 @@ class SubtitleGenerator:
 
     def _generate_stylized_ass(self, path: Path, words: List[Dict], fallback_text: str = ""):
         """
-        Generates modern YouTube-style subtitles:
+        Generates modern YouTube/TikTok-style subtitles:
         - Bold font, Yellow highlight / White text, Deep black shadow/outline.
+        - Responsive resolution & margins based on 16:9 vs 9:16.
         """
-        header = """[Script Info]
+        if self.aspect_ratio == "9:16":
+            res_x, res_y = 1080, 1920
+            font_size = 64
+            margin_v = 360  # Safe zone for mobile UI buttons
+            chunk_size = 4
+        else:
+            res_x, res_y = 1920, 1080
+            font_size = 56
+            margin_v = 90
+            chunk_size = 5
+
+        header = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
+PlayResX: {res_x}
+PlayResY: {res_y}
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: RecapDefault,Arial,56,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3.5,2.0,2,40,40,90,1
-Style: HighlightWord,Arial,60,&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4.0,2.5,2,40,40,90,1
+Style: RecapDefault,Arial,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3.5,2.0,2,40,40,{margin_v},1
+Style: HighlightWord,Arial,{font_size + 4},&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4.0,2.5,2,40,40,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
         events = []
         if words:
-            # Group every 4-6 words into a subtitle line
-            chunk_size = 5
             for i in range(0, len(words), chunk_size):
                 chunk = words[i:i + chunk_size]
                 start_t = self._format_timestamp_ass(chunk[0]["start"])
