@@ -16,6 +16,55 @@ from pydantic import BaseModel, Field
 from PIL import Image
 
 
+def _sanitize_vietnamese_text(text: str) -> str:
+    """
+    Cleans up Chinese leaks and strips all bracket emotion tags (e.g. [thở dài], [tiếng thở dốc]).
+    Ensures 100% pure Vietnamese narration suitable for TTS narration.
+    """
+    if not text:
+        return ""
+
+    # 1. Strip all bracket tags completely (e.g., [thở dài], [tiếng thở dốc], [hắng giọng], etc.)
+    text = re.sub(r"\[[^\]]*\]", "", text)
+
+    # 2. Common Chinese leaks from Qwen visual tokenizer
+    replacements = {
+        "đồng phục校服": "đồng phục",
+        "校服": "đồng phục",
+        "áo mưa雨衣": "áo mưa",
+        "雨衣": "áo mưa",
+        "chiếc ô雨伞": "chiếc ô",
+        "cây dù雨伞": "cây dù",
+        "雨伞": "chiếc ô",
+        "lớp học教室": "lớp học",
+        "教室": "lớp học",
+        "thầy cô老师": "giáo viên",
+        "老师": "giáo viên",
+        "học sinh学生": "học sinh",
+        "学生": "học sinh",
+        "quái vật怪物": "quái vật",
+        "怪物": "quái vật",
+        "bóng ma幽灵": "bóng ma",
+        "幽灵": "bóng ma",
+        "dưới mưa雨中": "dưới mưa",
+        "雨中": "dưới mưa",
+    }
+    for zh, vi in replacements.items():
+        text = text.replace(zh, vi)
+
+    # 3. Remove any remaining CJK unified ideographs
+    text = re.sub(r"[\u4e00-\u9fff]+", "", text)
+
+    # 4. Deduplicate duplicated words
+    for phrase in ["đồng phục", "áo mưa", "chiếc ô", "quái vật", "bóng ma", "dưới mưa", "học sinh"]:
+        text = text.replace(f"{phrase} {phrase}", phrase).replace(f"{phrase}{phrase}", phrase)
+
+    # 5. Clean up redundant spaces and punctuation spacing
+    text = re.sub(r"\s+([,.:;?!])", r"\1", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 # --- Pydantic Schema for Structured Output ---
 class SceneItem(BaseModel):
     panel_file: str = Field(description="Exact filename of the selected panel, e.g. 'panel_0001.png'")
@@ -142,7 +191,7 @@ class ScriptGenerator:
             "3. LỌC BỎ các tranh phụ, khung cảnh tĩnh không quan trọng. CHỈ CHỌN các tranh có điểm kịch tính cao (>= 7).\n"
             "4. Với mỗi tranh được chọn, viết lời bình dẫn chuyện bằng tiếng Việt mang giọng điệu trầm, bí ẩn, rùng rợn và kích thích trí tò mò.\n"
             "5. BẮT BUỘC trả về đúng chính xác trường 'panel_file' theo đúng tên file tương ứng với khung tranh bạn chọn.\n"
-            "6. Có thể lồng ghép các biểu cảm giọng nói như [thở dài], [tiếng thở dốc] để giọng đọc chân thực."
+            "6. Diễn biến câu chuyện phải nối tiếp liền mạch, không lặp lại mô tả ở các cảnh liên tiếp. TUYỆT ĐỐI KHÔNG dùng bất kỳ thẻ cảm xúc nào trong ngoặc vuông như [thở dài] hay [tiếng thở dốc]."
         )
 
         for i in range(0, len(panels), batch_size):
@@ -166,7 +215,7 @@ class ScriptGenerator:
                     print(f"Warning: could not open image {p['file_path']}: {e}")
 
             contents_payload.append(
-                "Hãy chọn các cảnh đắt giá nhất (dramatic_score >= 7), viết lời bình tiếng Việt rùng rợn, "
+                "Hãy chọn các cảnh đắt giá nhất (dramatic_score >= 7), viết lời bình tiếng Việt rùng rợn thuần túy (không kèm tag [thở dài]), "
                 "đề xuất camera motion và sfx, đảm bảo trường 'panel_file' đúng chính xác tên file đã gửi."
             )
 
@@ -190,6 +239,7 @@ class ScriptGenerator:
 
                 for sc in data.get("scenes", []):
                     if sc.get("dramatic_score", 0) >= min_score:
+                        sc["narration"] = _sanitize_vietnamese_text(sc.get("narration", ""))
                         selected_scenes.append(sc)
             except Exception as e:
                 print(f"[Script Generator] Batch failed: {e}. Generating fallback entries for this batch.")
@@ -197,7 +247,7 @@ class ScriptGenerator:
                     selected_scenes.append({
                         "panel_file": p["file_name"],
                         "dramatic_score": 7,
-                        "narration": f"Cơn ác mộng lại tiếp diễn trong tĩnh lặng... [thở dài]",
+                        "narration": "Cơn ác mộng lại tiếp diễn trong tĩnh lặng... Sự nguy hiểm cận kề.",
                         "camera_motion": "zoom_in",
                         "sfx_cue": "heart_beat"
                     })
@@ -226,7 +276,7 @@ class ScriptGenerator:
     ) -> Dict:
         """
         Offline local inference using Qwen2.5-VL (3B or 7B-Instruct with 4-bit quantization).
-        Optimized for Google Colab GPU T4 (16GB VRAM) and automatically releases VRAM upon completion.
+        Optimized with narrative continuity memory, sampling, repetition penalty, and VRAM cleanup.
         """
         model_id = self.model_name or "Qwen/Qwen2.5-VL-7B-Instruct"
         print(f"[Script Generator] Initializing local Vision-LLM: {model_id}...")
@@ -297,18 +347,7 @@ class ScriptGenerator:
 
         print(f"[Script Generator] Analyzing {len(candidate_panels)} candidate panels with {model_id}...")
         selected_scenes = []
-
-        system_prompt = (
-            "Bạn là biên kịch kiêm đạo diễn video review / recap truyện tranh phong cách kinh dị giật gân (Quán Khuya).\n"
-            f"Bối cảnh truyện: {synopsis or 'Không khí căng thẳng, u ám, bí ẩn kinh dị'}.\n"
-            "Hãy nhìn kỹ khung tranh và trả về DUY NHẤT một đối tượng JSON có cấu trúc sau:\n"
-            "{\n"
-            '  "dramatic_score": <số nguyên từ 1 đến 10>,\n'
-            '  "narration": "<lời kể dẫn chuyện tiếng Việt rùng rợn, gợi cảm giác hồi hộp, có thể kèm tag [thở dài] hoặc [tiếng thở dốc]>",\n'
-            '  "camera_motion": "<chọn 1 trong: zoom_in, zoom_out, pan_left, pan_right>",\n'
-            '  "sfx_cue": "<chọn 1 trong: heart_beat, door_creak, creepy_whisper, jumpscare, none>"\n'
-            "}"
-        )
+        previous_narration = ""
 
         for idx, p in enumerate(candidate_panels, start=1):
             try:
@@ -321,6 +360,38 @@ class ScriptGenerator:
                 max_dim = 1024
                 if max(img.size) > max_dim:
                     img.thumbnail((max_dim, max_dim))
+
+                # Dynamic storytelling prompt providing context continuity
+                if previous_narration:
+                    context_instruction = (
+                        f"Diễn biến cảnh vừa rồi bạn đã kể: '{previous_narration}'.\n"
+                        "Nhiệm vụ cho cảnh này:\n"
+                        "1. Quan sát hình ảnh và viết câu diễn biến TIẾP THEO để câu chuyện phát triển liền mạch.\n"
+                        "2. TUYỆT ĐỐI KHÔNG sử dụng bất kỳ thẻ biểu cảm nào trong ngoặc vuông như [thở dài], [tiếng thở dốc] hay [hắng giọng].\n"
+                        "3. TUYỆT ĐỐI KHÔNG lặp lại việc miêu tả ngoại hình, quần áo, thời tiết mưa nếu cảnh trước đã đề cập.\n"
+                        "4. Tập trung vào: hành động mới của nhân vật, nỗi sợ hãi gia tăng, hoặc điều kinh hoàng mới xuất hiện."
+                    )
+                else:
+                    context_instruction = (
+                        "Nhiệm vụ: Đây là cảnh mở đầu. Hãy bắt đầu câu chuyện một cách hồi hộp, rùng rợn và kích thích trí tò mò.\n"
+                        "- TUYỆT ĐỐI KHÔNG sử dụng bất kỳ thẻ biểu cảm nào như [thở dài] hay dấu ngoặc vuông. Hãy dùng câu dẫn chuyện điện ảnh thuần túy."
+                    )
+
+                system_prompt = (
+                    "Bạn là biên kịch kiêm đạo diễn video recap truyện tranh phong cách kinh dị giật gân (Quán Khuya).\n"
+                    f"Bối cảnh tổng thể: {synopsis or 'Không khí căng thẳng, u ám, bí ẩn kinh dị'}.\n"
+                    f"{context_instruction}\n"
+                    "Quy tắc ngôn ngữ:\n"
+                    "- 100% tiếng Việt tự nhiên, sinh động, không rò rỉ bất kỳ từ Hán tự/tiếng Trung nào.\n"
+                    "- TUYỆT ĐỐI KHÔNG dùng thẻ biểu cảm trong ngoặc vuông (như [thở dài], [tiếng thở dốc]). Chỉ viết lời đọc truyện thuần túy.\n"
+                    "- Chỉ trả về DUY NHẤT một khối JSON hợp lệ theo cấu trúc sau:\n"
+                    "{\n"
+                    '  "dramatic_score": <số nguyên từ 1 đến 10>,\n'
+                    '  "narration": "<câu kể chuyện tiếng Việt rùng rợn thuần túy, nối tiếp mạch truyện>",\n'
+                    '  "camera_motion": "<chọn 1 trong: zoom_in, zoom_out, pan_left, pan_right>",\n'
+                    '  "sfx_cue": "<chọn 1 trong: heart_beat, door_creak, creepy_whisper, jumpscare, none>"\n'
+                    "}"
+                )
 
                 messages = [
                     {
@@ -342,8 +413,16 @@ class ScriptGenerator:
 
                 inputs = inputs.to("cuda")
 
+                # Sampling parameters with repetition penalty to eliminate loop repetition
                 with torch.no_grad():
-                    generated_ids = model.generate(**inputs, max_new_tokens=180, do_sample=False)
+                    generated_ids = model.generate(
+                        **inputs,
+                        max_new_tokens=180,
+                        do_sample=True,
+                        temperature=0.7,
+                        top_p=0.85,
+                        repetition_penalty=1.2
+                    )
                     generated_ids_trimmed = [
                         out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
                     ]
@@ -377,8 +456,11 @@ class ScriptGenerator:
                 else:
                     narration = cleaned
 
+                # Sanitize Vietnamese text: strip all brackets, leaks, and duplicate words
+                narration = _sanitize_vietnamese_text(narration)
+
                 if not narration or len(narration) < 10:
-                    narration = f"Khung cảnh thứ {idx} chìm trong bóng tối... Có điều gì đó bất thường đang diễn ra. [thở dài]"
+                    narration = "Sự tĩnh lặng rợn người bao trùm lấy không gian... Điều bất thường đang dần lộ diện."
 
                 if score >= min_score or len(selected_scenes) < 5:
                     selected_scenes.append({
@@ -388,7 +470,8 @@ class ScriptGenerator:
                         "camera_motion": motion,
                         "sfx_cue": sfx
                     })
-                    print(f"  [Qwen-VL] Scene {len(selected_scenes)}/{max_scenes} (Score {score}): {narration[:60]}...")
+                    previous_narration = narration
+                    print(f"  [Qwen-VL] Scene {len(selected_scenes)}/{max_scenes} (Score {score}): {narration[:65]}...")
 
                 if len(selected_scenes) >= max_scenes:
                     break
@@ -398,7 +481,7 @@ class ScriptGenerator:
                 selected_scenes.append({
                     "panel_file": p["file_name"],
                     "dramatic_score": 7,
-                    "narration": f"Cơn ác mộng lại tiếp diễn trong tĩnh lặng... [thở dài]",
+                    "narration": "Cơn ác mộng lại tiếp diễn trong tĩnh lặng... Sự nguy hiểm cận kề.",
                     "camera_motion": "zoom_in",
                     "sfx_cue": "heart_beat"
                 })
