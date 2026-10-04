@@ -9,6 +9,11 @@ import yaml
 import argparse
 from pathlib import Path
 
+# Fix httpx NO_PROXY bug with IPv6 brackets
+for _k in ["NO_PROXY", "no_proxy"]:
+    if _k in os.environ and "::1" in os.environ[_k]:
+        os.environ[_k] = os.environ[_k].replace(",[::1]", "").replace(",::1", "").replace("[::1]", "").replace("::1", "")
+
 # Add src to python path
 sys.path.append(str(Path(__file__).parent))
 
@@ -66,9 +71,13 @@ def run_pipeline(
 
     # 4. Step 3: AI Climax Filtering & Scriptwriting
     print("\n--- [STEP 3/5] AI Climax Filtering & Script Generation ---")
+    active_key = gemini_api_key or os.environ.get("GEMINI_API_KEY", "")
+    if active_key in ["PLACEHOLDER", "your_gemini_api_key_here"]:
+        active_key = ""
+
     script_gen = ScriptGenerator(
         provider=cfg.get("script_generator", {}).get("provider", "gemini"),
-        api_key=gemini_api_key,
+        api_key=active_key,
         model_name=cfg.get("script_generator", {}).get("gemini_model", "gemini-3.8-flash"),
         output_file=str(work_dir / "timeline.json")
     )
@@ -146,7 +155,7 @@ def run_pipeline(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Manga Recap AI Studio")
-    parser.add_argument("--input", required=True, help="URL of chapter or path to .zip/.cbz/folder")
+    parser.add_argument("--input", required=True, help="URL of chapter or path to .zip/.cbz/.pdf/folder")
     parser.add_argument("--api-key", default=None, help="Google Gemini API key")
     parser.add_argument("--synopsis", default="", help="Brief story context")
     parser.add_argument("--voice", default="NamMinh", help="TTS voice preset")

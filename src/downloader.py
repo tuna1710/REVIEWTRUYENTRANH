@@ -1,6 +1,6 @@
 """
 Module 1: Manga Downloader & Ingestion
-Handles downloading chapters from online manga URLs or extracting from local archive files.
+Handles downloading chapters from online manga URLs or extracting from local archive files (.zip, .cbz, .pdf).
 """
 
 import os
@@ -53,7 +53,7 @@ class MangaDownloader:
 
     def load_from_local_archive(self, file_path: str) -> List[str]:
         """
-        Extracts images from a .zip, .cbz, or directory.
+        Extracts images from a .zip, .cbz, .pdf, or directory.
         """
         path = Path(file_path)
         if not path.exists():
@@ -69,6 +69,10 @@ class MangaDownloader:
                 dest = self.output_dir / f"page_{idx:03d}{f.suffix.lower()}"
                 shutil.copy(f, dest)
             return self.get_sorted_pages()
+
+        # If it's a PDF document
+        if path.suffix.lower() == ".pdf":
+            return self._extract_pdf(path)
 
         # If it's a zip or cbz archive
         if path.suffix.lower() in [".zip", ".cbz"]:
@@ -90,7 +94,39 @@ class MangaDownloader:
             shutil.rmtree(temp_extract, ignore_errors=True)
             return self.get_sorted_pages()
 
-        raise ValueError(f"Unsupported local format: {path.suffix}. Must be .zip, .cbz, or directory.")
+        raise ValueError(f"Unsupported local format: {path.suffix}. Must be .zip, .cbz, .pdf, or directory.")
+
+    def _extract_pdf(self, pdf_path: Path) -> List[str]:
+        """
+        Extracts high-resolution page images from a PDF file.
+        Uses pypdfium2 if available, or PyMuPDF (fitz) as fallback.
+        """
+        try:
+            import pypdfium2 as pdfium
+            pdf = pdfium.PdfDocument(str(pdf_path))
+            print(f"[Downloader] Extracting {len(pdf)} pages from PDF using pypdfium2...")
+            for idx, page in enumerate(pdf, start=1):
+                dest = self.output_dir / f"page_{idx:03d}.png"
+                # Render at 2x scale for crisp manga panels
+                img = page.render(scale=2.0).to_pil()
+                img.save(str(dest), "PNG")
+            return self.get_sorted_pages()
+        except ImportError:
+            pass
+
+        try:
+            import fitz
+            doc = fitz.open(str(pdf_path))
+            print(f"[Downloader] Extracting {len(doc)} pages from PDF using PyMuPDF...")
+            for idx, page in enumerate(doc, start=1):
+                dest = self.output_dir / f"page_{idx:03d}.png"
+                pix = page.get_pixmap(dpi=150)
+                pix.save(str(dest))
+            return self.get_sorted_pages()
+        except ImportError:
+            raise ImportError(
+                "PDF support requires 'pypdfium2' or 'PyMuPDF'. Please install: pip install pypdfium2 pillow"
+            )
 
     def _fallback_scraper(self, url: str) -> List[str]:
         """

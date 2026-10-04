@@ -8,11 +8,13 @@ gradio>=4.20.0
 ultralytics>=8.3.0
 opencv-python-headless>=4.9.0
 pillow>=10.2.0
+huggingface_hub>=0.24.0
 
-# Downloader & Web Crawler
+# Downloader & Document Ingestion
 gallery-dl>=1.27.0
 cloudscraper>=1.2.71
 requests>=2.31.0
+pypdfium2>=4.30.0
 
 # LLM & Script Generation
 google-genai>=0.1.1
@@ -22,6 +24,7 @@ tqdm>=4.66.0
 
 # Text-To-Speech (VieNeu-TTS-v3-Turbo) & Subtitles
 vieneu>=3.7.0
+edge-tts>=6.1.0
 soundfile>=0.12.1
 faster-whisper>=1.0.0
 

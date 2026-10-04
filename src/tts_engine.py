@@ -1,10 +1,12 @@
 """
-Module 4A: TTS Engine (VieNeu-TTS-v3-Turbo)
+Module 4A: TTS Engine (VieNeu-TTS-v3-Turbo & Edge-TTS Fallback)
 High-fidelity 48kHz Vietnamese speech synthesis with emotion tags and instant voice cloning.
 """
 
 import os
+import re
 import subprocess
+import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional
 import soundfile as sf
@@ -32,7 +34,7 @@ class TTSEngine:
         self.engine = None
 
         if HAS_VIENEU:
-            print(f"[TTS Engine] Initializing VieNeu-TTS-v3-Turbo...")
+            print("[TTS Engine] Initializing VieNeu-TTS-v3-Turbo...")
             try:
                 self.engine = Vieneu()
             except Exception as e:
@@ -50,24 +52,36 @@ class TTSEngine:
         # 1. Try VieNeu-TTS-v3-Turbo
         if self.engine is not None:
             try:
-                # Handle reference audio cloning if available
+                clean_voice = self.voice_preset.split(" ")[0].strip()
                 if self.reference_audio and os.path.exists(self.reference_audio):
-                    audio_array, sr = self.engine.infer(
+                    result = self.engine.infer(
                         text=text,
-                        reference_audio=self.reference_audio
+                        ref_audio=self.reference_audio,
+                        denoise=True
                     )
                 else:
-                    audio_array, sr = self.engine.infer(
+                    result = self.engine.infer(
                         text=text,
-                        voice=self.voice_preset
+                        voice=clean_voice
                     )
-                sf.write(str(out_path), audio_array, sr)
+
+                if isinstance(result, tuple) and len(result) == 2:
+                    audio_array, sr = result
+                else:
+                    audio_array = result
+                    sr = getattr(self.engine, "sample_rate", self.sample_rate)
+
+                if hasattr(self.engine, "save"):
+                    self.engine.save(audio_array, str(out_path))
+                else:
+                    sf.write(str(out_path), audio_array, sr)
+
                 duration = len(audio_array) / float(sr)
                 return {"audio_path": str(out_path), "duration": duration}
             except Exception as e:
                 print(f"[TTS Engine] VieNeu synthesis error: {e}. Attempting edge-tts fallback...")
 
-        # 2. Fallback using edge-tts (Vietnamese Nam voice: vi-VN-NamMinhNeural)
+        # 2. Fallback using edge-tts (Vietnamese neural voice)
         duration = self._fallback_edge_tts(text, str(out_path))
         return {"audio_path": str(out_path), "duration": duration}
 
@@ -75,23 +89,29 @@ class TTSEngine:
         """
         Clean fallback using edge-tts CLI if VieNeu has an environment issue.
         """
-        # Clean custom emotion tags like [thở dài] for edge-tts
-        import re
         clean_text = re.sub(r'\[.*?\]', '', text).strip()
         if not clean_text:
             clean_text = "..."
 
+        voice_name = "vi-VN-NamMinhNeural"
+        if "bac" in self.voice_preset.lower() or "hoaimy" in self.voice_preset.lower():
+            voice_name = "vi-VN-HoaiMyNeural"
+
         cmd = [
             "edge-tts",
-            "--voice", "vi-VN-NamMinhNeural",
+            "--voice", voice_name,
             "--text", clean_text,
             "--write-media", output_path
         ]
         try:
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
-            # Create a silent placeholder wav if CLI edge-tts is missing
-            dummy = [0.0] * (self.sample_rate * 3) # 3 seconds silence
+            # Generate placeholder tone proportional to text length (~0.35s per word)
+            word_count = max(1, len(clean_text.split()))
+            est_duration = max(3.0, word_count * 0.35)
+            num_samples = int(self.sample_rate * est_duration)
+            t = np.linspace(0, est_duration, num_samples, endpoint=False)
+            dummy = (0.05 * np.sin(2 * np.pi * 120 * t)).astype(np.float32)
             sf.write(output_path, dummy, self.sample_rate)
 
         # Get duration using soundfile

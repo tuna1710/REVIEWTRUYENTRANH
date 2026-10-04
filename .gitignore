@@ -31,6 +31,10 @@ temp/
 *.ass
 *.json
 
+# Whitelist asset files
+!assets/bgm/*.mp3
+!assets/sample_chapter.pdf
+
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints
 */.ipynb_checkpoints/*

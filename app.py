@@ -44,8 +44,9 @@ def detect_storage_dir(prefer_drive: bool = True) -> Path:
 
 def process_pipeline(
     manga_url: str,
-    local_zip,
+    local_file,
     gemini_key: str,
+    model_choice: str,
     synopsis: str,
     voice_preset: str,
     ref_audio,
@@ -82,11 +83,11 @@ def process_pipeline(
     if manga_url and manga_url.strip().startswith("http"):
         log(f"📥 Đang cào ảnh từ URL: {manga_url}")
         pages = downloader.download_from_url(manga_url.strip())
-    elif local_zip is not None:
-        log(f"📦 Đang giải nén file tải lên: {local_zip.name}")
-        pages = downloader.load_from_local_archive(local_zip.name)
+    elif local_file is not None:
+        log(f"📦 Đang giải nén/trích xuất file tải lên: {local_file.name}")
+        pages = downloader.load_from_local_archive(local_file.name)
     else:
-        return None, None, None, log("❌ Lỗi: Vui lòng nhập link truyện tranh hoặc tải lên file .zip/.cbz!")
+        return None, None, None, log("❌ Lỗi: Vui lòng nhập link truyện tranh hoặc tải lên file .zip/.cbz/.pdf!")
 
     if not pages:
         return None, None, None, log("❌ Không tìm thấy trang truyện nào!")
@@ -101,8 +102,9 @@ def process_pipeline(
     log(f"✅ Đã cắt thành công {len(panels_meta)} panels ô tranh.")
 
     # --- BƯỚC 3: GEMINI CHỌN CẢNH & VIẾT KỊCH BẢN ---
-    progress(0.45, desc="Gemini 3.8 Flash đang đạo diễn & viết kịch bản...")
-    log("🧠 Đang gửi hình ảnh qua Gemini 3.8 Flash để chấm điểm kịch tính và chọn cảnh đắt giá...")
+    clean_model_name = model_choice.split(" ")[0].strip() if model_choice else "gemini-3.8-flash"
+    progress(0.45, desc=f"Đạo diễn AI ({clean_model_name}) đang viết kịch bản...")
+    log(f"🧠 Đang gửi hình ảnh qua AI ({clean_model_name}) để chấm điểm kịch tính và chọn cảnh đắt giá...")
     
     api_key_to_use = gemini_key.strip() if gemini_key else os.environ.get("GEMINI_API_KEY", "")
     timeline_file = storage_dir / "timeline.json"
@@ -110,6 +112,7 @@ def process_pipeline(
     script_gen = ScriptGenerator(
         provider="gemini" if api_key_to_use else "qwen_vl",
         api_key=api_key_to_use,
+        model_name=clean_model_name,
         output_file=str(timeline_file)
     )
 
@@ -120,7 +123,7 @@ def process_pipeline(
         max_scenes=max_panels
     )
     selected_scenes = timeline.get("scenes", [])
-    log(f"🎬 Đạo diễn AI đã chọn ra {len(selected_scenes)} cảnh cao trào cho video.")
+    log(f"🎬 Đạo diễn AI đã chọn ra {len(selected_scenes)} cảnh cao trào cho video: '{timeline.get('title', '')}'")
 
     # --- BƯỚC 4: GIỌNG ĐỌC VIENEU-TTS & PHỤ ĐỀ WHISPER ---
     progress(0.65, desc="VieNeu-TTS đang đọc & Faster-Whisper tạo sub...")
@@ -224,12 +227,22 @@ def create_ui():
                         lines=1
                     )
                     local_archive = gr.File(
-                        label="HOẶC Tải lên file .zip / .cbz từ máy tính",
-                        file_types=[".zip", ".cbz"]
+                        label="HOẶC Tải lên file .zip / .cbz / .pdf từ máy tính",
+                        file_types=[".zip", ".cbz", ".pdf"]
                     )
 
                 with gr.Group():
-                    gr.Markdown("### 🧠 2. Đạo Diễn AI (Gemini 3.8 Flash)")
+                    gr.Markdown("### 🧠 2. Đạo Diễn AI (Google Gemini)")
+                    with gr.Row():
+                        model_choice = gr.Dropdown(
+                            label="Phiên bản Gemini Model",
+                            choices=[
+                                "gemini-3.8-flash (Tối ưu nhất - Gemini 3)",
+                                "gemini-3.5-flash-lite (Siêu tốc & Tiết kiệm)",
+                                "gemini-2.5-flash (Thế hệ trước)"
+                            ],
+                            value="gemini-3.8-flash (Tối ưu nhất - Gemini 3)"
+                        )
                     gemini_api_key = gr.Textbox(
                         label="Google Gemini API Key (Miễn phí 100% tại aistudio.google.com)",
                         placeholder="Để trống nếu đã cài trong Colab Secrets hoặc dùng Offline Qwen-VL",
@@ -305,6 +318,7 @@ def create_ui():
                 input_url,
                 local_archive,
                 gemini_api_key,
+                model_choice,
                 synopsis_input,
                 voice_choice,
                 ref_audio_input,

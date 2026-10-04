@@ -37,7 +37,26 @@ class MangaPanelExtractor:
         if HAS_ULTRALYTICS:
             try:
                 print(f"[Panel Extractor] Initializing YOLO model: {self.model_name}...")
-                self.model = YOLO(self.model_name)
+                model_file = self.model_name
+                # Handle Hugging Face repository identifiers
+                if "/" in self.model_name and not os.path.exists(self.model_name):
+                    try:
+                        from huggingface_hub import hf_hub_download
+                        if "manga-panel-detector" in self.model_name:
+                            model_file = hf_hub_download(
+                                repo_id=self.model_name,
+                                filename="manga_panel_detector_fp32.pt"
+                            )
+                        else:
+                            model_file = hf_hub_download(
+                                repo_id=self.model_name,
+                                filename="best.pt"
+                            )
+                        print(f"[Panel Extractor] Downloaded YOLO weights from HF: {model_file}")
+                    except Exception as hf_e:
+                        print(f"[Panel Extractor] HuggingFace download note: {hf_e}")
+
+                self.model = YOLO(model_file)
             except Exception as e:
                 print(f"[Panel Extractor] Warning: Could not load YOLO weights ({e}). OpenCV fallback enabled.")
 

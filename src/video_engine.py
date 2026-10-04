@@ -33,18 +33,23 @@ class VideoEngine:
 
     def _detect_encoder(self) -> str:
         """
-        Detects if NVIDIA NVENC hardware encoder is available on Colab T4.
+        Detects if NVIDIA NVENC hardware encoder is actively functional on Colab T4.
         """
         if not self.use_nvenc:
             return "libx264"
         try:
-            res = subprocess.run(["ffmpeg", "-encoders"], capture_output=True, text=True)
-            if "h264_nvenc" in res.stdout:
-                print("[Video Engine] NVIDIA NVENC hardware acceleration detected!")
+            # Probe with a fast 0.05s null test to confirm active GPU hardware encoding
+            test_cmd = [
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.05",
+                "-c:v", "h264_nvenc", "-f", "null", "-"
+            ]
+            res = subprocess.run(test_cmd, capture_output=True)
+            if res.returncode == 0:
+                print("[Video Engine] NVIDIA NVENC hardware acceleration confirmed & ready!")
                 return "h264_nvenc"
         except Exception:
             pass
-        print("[Video Engine] Using CPU libx264 encoder.")
+        print("[Video Engine] NVENC unavailable or no active GPU, using CPU libx264 encoder.")
         return "libx264"
 
     def render_scene(
@@ -70,11 +75,11 @@ class VideoEngine:
             except Exception:
                 duration = 5.0 # fallback
 
-        total_frames = int(duration * self.fps)
+        total_frames = max(1, int(duration * self.fps))
 
         # Configure Ken Burns zoom formula
         if camera_motion == "zoom_in":
-            zoom_expr = f"min(zoom+0.0015,1.25)"
+            zoom_expr = "min(zoom+0.0015,1.25)"
             x_expr = "iw/2-(iw/zoom/2)"
             y_expr = "ih/2-(ih/zoom/2)"
         elif camera_motion == "zoom_out":
@@ -100,28 +105,58 @@ class VideoEngine:
         )
 
         if sub_ass_path and os.path.exists(sub_ass_path):
-            clean_sub_path = sub_ass_path.replace("\\", "/").replace(":", "\\:")
-            filter_complex += f";[base]ass='{clean_sub_path}'[v]"
+            abs_sub = Path(sub_ass_path).resolve().as_posix()
+            escaped_sub = abs_sub.replace(":", r"\:")
+            filter_complex += f";[base]ass='{escaped_sub}'[v]"
             video_map = "[v]"
         else:
             video_map = "[base]"
 
-        ffmpeg_cmd = [
-            "ffmpeg", "-y",
-            "-loop", "1", "-i", panel_path,
-            "-i", audio_path,
-            "-filter_complex", filter_complex,
-            "-map", video_map,
-            "-map", "1:a",
-            "-c:v", self.encoder,
-            "-preset", "p4" if self.encoder == "h264_nvenc" else "veryfast",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k",
-            "-t", str(duration),
-            str(out_mp4)
-        ]
+        def _build_cmd(encoder: str):
+            return [
+                "ffmpeg", "-y",
+                "-loop", "1", "-i", str(Path(panel_path).resolve()),
+                "-i", str(Path(audio_path).resolve()),
+                "-filter_complex", filter_complex,
+                "-map", video_map,
+                "-map", "1:a",
+                "-c:v", encoder,
+                "-preset", "p4" if encoder == "h264_nvenc" else "veryfast",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k",
+                "-t", str(duration),
+                str(out_mp4)
+            ]
 
-        subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            cmd = _build_cmd(self.encoder)
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as e:
+            if self.encoder == "h264_nvenc":
+                print("[Video Engine] NVENC encoding failed, retrying scene with CPU libx264...")
+                self.encoder = "libx264"
+                cmd = _build_cmd("libx264")
+                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            else:
+                # If ASS subtitle filter failed, retry without ASS filter
+                print(f"[Video Engine] Render failed ({e}), retrying without ASS overlay...")
+                clean_filter = filter_complex.split(";[base]ass")[0]
+                fallback_cmd = [
+                    "ffmpeg", "-y",
+                    "-loop", "1", "-i", str(Path(panel_path).resolve()),
+                    "-i", str(Path(audio_path).resolve()),
+                    "-filter_complex", clean_filter,
+                    "-map", "[base]",
+                    "-map", "1:a",
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-t", str(duration),
+                    str(out_mp4)
+                ]
+                subprocess.run(fallback_cmd, check=True)
+
         return str(out_mp4)
 
     def concatenate_scenes(
@@ -137,7 +172,7 @@ class VideoEngine:
         concat_txt = self.output_dir / "concat_list.txt"
         with open(concat_txt, "w", encoding="utf-8") as f:
             for p in scene_video_paths:
-                f.write(f"file '{Path(p).resolve()}'\n")
+                f.write(f"file '{Path(p).resolve().as_posix()}'\n")
 
         temp_combined = self.output_dir / "temp_combined.mp4"
 
@@ -157,7 +192,7 @@ class VideoEngine:
             cmd_mix = [
                 "ffmpeg", "-y",
                 "-i", str(temp_combined),
-                "-stream_loop", "-1", "-i", bgm_path,
+                "-stream_loop", "-1", "-i", str(Path(bgm_path).resolve()),
                 "-filter_complex",
                 f"[1:a]volume={bgm_volume_db}dB[bgm];[0:a][bgm]amix=inputs=2:duration=first[a]",
                 "-map", "0:v",
