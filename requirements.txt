@@ -28,6 +28,7 @@ vieneu>=3.7.0
 edge-tts>=6.1.0
 soundfile>=0.12.1
 faster-whisper>=1.0.0
+av<15.0.0
 
 # Optional Open-Source Offline VLM (Qwen2.5-VL 4-bit)
 transformers>=4.48.0

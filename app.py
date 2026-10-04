@@ -621,4 +621,15 @@ def create_ui():
 
 if __name__ == "__main__":
     demo = create_ui()
-    demo.launch(theme=custom_theme, share=True, debug=True)
+    allowed_dirs = [
+        str(BASE_DIR),
+        str(BASE_DIR / "workspace"),
+        "/content/workspace",
+        "/content/drive/MyDrive/MangaRecap",
+        "/tmp"
+    ]
+    demo.launch(
+        allowed_paths=allowed_dirs,
+        share=True,
+        debug=True
+    )

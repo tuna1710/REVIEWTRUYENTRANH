@@ -8,6 +8,17 @@ import os
 from pathlib import Path
 from typing import List, Dict, Optional
 
+# Compatibility fix: PyAV 14+ removed 'metadata_errors' which causes faster-whisper to fail
+try:
+    import av
+    _orig_av_open = av.open
+    def _safe_av_open(*args, **kwargs):
+        kwargs.pop("metadata_errors", None)
+        return _orig_av_open(*args, **kwargs)
+    av.open = _safe_av_open
+except Exception:
+    pass
+
 try:
     from faster_whisper import WhisperModel
     HAS_WHISPER = True
