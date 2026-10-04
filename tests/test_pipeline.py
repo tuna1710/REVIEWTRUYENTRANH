@@ -60,7 +60,7 @@ class TestMangaRecapPipeline(unittest.TestCase):
             self.assertIn("panel_id", p)
 
     def test_03_script_generation(self):
-        """Step 3: Test AI / Simulation Script Generator"""
+        """Step 3: Test AI / Simulation Script Generator (both Gemini and Qwen-VL)"""
         panels_dir = self.output_dir / "panels"
         panel_files = sorted(list(panels_dir.glob("*.png")))
         self.assertTrue(len(panel_files) > 0, "No panels available for script generation")
@@ -70,6 +70,24 @@ class TestMangaRecapPipeline(unittest.TestCase):
             for idx, pf in enumerate(panel_files[:3], 1)
         ]
 
+        # 3a. Test Qwen2.5-VL Script Generator
+        timeline_qwen_out = self.output_dir / "timeline_qwen.json"
+        script_gen_qwen = ScriptGenerator(
+            provider="qwen_vl",
+            model_name="Qwen/Qwen2.5-VL-7B-Instruct",
+            output_file=str(timeline_qwen_out)
+        )
+        timeline_qwen = script_gen_qwen.generate_timeline(
+            panels_metadata=panels_meta,
+            story_synopsis="Cô nữ sinh nhìn thấy quái vật kinh dị lúc nửa đêm",
+            min_score=7,
+            max_scenes=3
+        )
+        self.assertIn("scenes", timeline_qwen)
+        self.assertGreater(len(timeline_qwen["scenes"]), 0)
+        self.assertTrue(timeline_qwen_out.exists())
+
+        # 3b. Test Gemini fallback
         timeline_out = self.output_dir / "timeline.json"
         script_gen = ScriptGenerator(
             provider="gemini",

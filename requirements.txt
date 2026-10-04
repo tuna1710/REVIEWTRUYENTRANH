@@ -30,10 +30,11 @@ soundfile>=0.12.1
 faster-whisper>=1.0.0
 av<15.0.0
 
-# Optional Open-Source Offline VLM (Qwen2.5-VL 4-bit)
+# Open-Source Local VLM (Qwen2.5-VL 3B / 7B 4-bit)
 transformers>=4.48.0
 accelerate>=0.34.0
 bitsandbytes>=0.43.0
+qwen-vl-utils>=0.0.8
 
 # Optional CapCut / JianYing Draft Export
 pyJianYingDraft>=0.1.4

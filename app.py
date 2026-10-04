@@ -125,13 +125,14 @@ def process_auto_pipeline(
     log(f"✅ Đã cắt thành công {len(panels_meta)} panels ô tranh.")
 
     # 3. AI Scriptwriting
-    clean_model_name = model_choice.split(" ")[0].strip() if model_choice else "gemini-3.8-flash"
+    clean_model_name = model_choice.split(" ")[0].strip() if model_choice else "Qwen/Qwen2.5-VL-7B-Instruct"
+    provider_to_use = "qwen_vl" if "qwen" in clean_model_name.lower() else "gemini"
     progress(0.45, desc=f"Đạo diễn AI ({clean_model_name}) đang viết kịch bản...")
     api_key_to_use = gemini_key.strip() if gemini_key else os.environ.get("GEMINI_API_KEY", "")
     timeline_file = storage_dir / "timeline.json"
 
     script_gen = ScriptGenerator(
-        provider="gemini" if api_key_to_use else "qwen_vl",
+        provider=provider_to_use,
         api_key=api_key_to_use,
         model_name=clean_model_name,
         output_file=str(timeline_file)
@@ -260,11 +261,12 @@ def step2_interactive_generate_script(
     storage_dir = detect_storage_dir(prefer_drive=False)
     timeline_file = storage_dir / "timeline.json"
 
-    clean_model_name = model_choice.split(" ")[0].strip() if model_choice else "gemini-3.8-flash"
+    clean_model_name = model_choice.split(" ")[0].strip() if model_choice else "Qwen/Qwen2.5-VL-7B-Instruct"
+    provider_to_use = "qwen_vl" if "qwen" in clean_model_name.lower() else "gemini"
     api_key_to_use = gemini_key.strip() if gemini_key else os.environ.get("GEMINI_API_KEY", "")
 
     script_gen = ScriptGenerator(
-        provider="gemini" if api_key_to_use else "qwen_vl",
+        provider=provider_to_use,
         api_key=api_key_to_use,
         model_name=clean_model_name,
         output_file=str(timeline_file)
@@ -437,13 +439,15 @@ def create_ui():
                             gr.Markdown("### 🧠 2. Cấu Hình Đạo Diễn AI")
                             with gr.Row():
                                 auto_model = gr.Dropdown(
-                                    label="Gemini Model",
+                                    label="Mô hình AI Đạo Diễn (Qwen2.5-VL / Gemini)",
                                     choices=[
-                                        "gemini-3.8-flash (Tối ưu nhất - Gemini 3)",
-                                        "gemini-3.5-flash-lite (Siêu tốc & Tiết kiệm)",
-                                        "gemini-2.5-flash (Thế hệ trước)"
+                                        "Qwen/Qwen2.5-VL-7B-Instruct (Chạy Offline 4-bit GPU T4 - Khuyên Dùng)",
+                                        "Qwen/Qwen2.5-VL-3B-Instruct (Chạy Offline Siêu Tốc & Nhẹ Máy)",
+                                        "gemini-3.8-flash (Google AI Studio Free API)",
+                                        "gemini-3.5-flash-lite (Google AI Studio API)",
+                                        "gemini-2.5-flash (Google AI Studio API)"
                                     ],
-                                    value="gemini-3.8-flash (Tối ưu nhất - Gemini 3)"
+                                    value="Qwen/Qwen2.5-VL-7B-Instruct (Chạy Offline 4-bit GPU T4 - Khuyên Dùng)"
                                 )
                                 auto_aspect = gr.Dropdown(
                                     label="Định Dạng Video",
@@ -452,7 +456,7 @@ def create_ui():
                                 )
 
                             auto_gemini_key = gr.Textbox(
-                                label="Gemini API Key (Miễn phí tại aistudio.google.com)",
+                                label="Gemini API Key (Chỉ cần khi chọn Gemini, bỏ trống nếu dùng Qwen2.5-VL)",
                                 placeholder="Để trống nếu đã cài trong môi trường",
                                 type="password"
                             )
@@ -539,11 +543,17 @@ def create_ui():
                 with gr.Accordion("📝 Bước 2: AI Đạo Diễn & Chỉnh Sửa Kịch Bản Trực Tiếp", open=True):
                     with gr.Row():
                         dir_model = gr.Dropdown(
-                            label="Model Gemini",
-                            choices=["gemini-3.8-flash (Tối ưu)", "gemini-3.5-flash-lite", "gemini-2.5-flash"],
-                            value="gemini-3.8-flash (Tối ưu)"
+                            label="Mô hình AI Đạo Diễn (Qwen2.5-VL / Gemini)",
+                            choices=[
+                                "Qwen/Qwen2.5-VL-7B-Instruct (Chạy Offline 4-bit GPU T4 - Khuyên Dùng)",
+                                "Qwen/Qwen2.5-VL-3B-Instruct (Chạy Offline Siêu Tốc & Nhẹ Máy)",
+                                "gemini-3.8-flash (Google AI Studio Free API)",
+                                "gemini-3.5-flash-lite (Google AI Studio API)",
+                                "gemini-2.5-flash (Google AI Studio API)"
+                            ],
+                            value="Qwen/Qwen2.5-VL-7B-Instruct (Chạy Offline 4-bit GPU T4 - Khuyên Dùng)"
                         )
-                        dir_key = gr.Textbox(label="Gemini API Key", placeholder="Để trống nếu có env key", type="password")
+                        dir_key = gr.Textbox(label="Gemini API Key (Chỉ cần khi chọn Gemini)", placeholder="Để trống nếu có env key", type="password")
                         dir_drama = gr.Slider(minimum=5, maximum=10, value=7, step=1, label="Điểm kịch tính tối thiểu")
                         dir_max_p = gr.Slider(minimum=10, maximum=50, value=25, step=5, label="Số cảnh tối đa")
 

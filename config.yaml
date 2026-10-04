@@ -19,10 +19,12 @@ panel_extractor:
   reading_order: "RTL" # Right-to-Left (Manga style)
   min_panel_area_ratio: 0.03 # Filter out micro noises
 
-# Script Generation Settings
+# Script Generation Settings (Vision AI Director)
 script_generator:
-  provider: "gemini" # "gemini" (Free Cloud API) or "qwen_vl" (Local Open-Source 4-bit)
-  gemini_model: "gemini-3.8-flash"
+  provider: "qwen_vl" # "qwen_vl" (Mã nguồn mở chạy trực tiếp trên GPU Colab T4) hoặc "gemini" (Free Cloud API)
+  qwen_model: "Qwen/Qwen2.5-VL-7B-Instruct" # "Qwen/Qwen2.5-VL-7B-Instruct" (Khuyên dùng) hoặc "Qwen/Qwen2.5-VL-3B-Instruct" (Siêu nhẹ)
+  quantization: "4bit" # "4bit" (tối ưu VRAM ~5.5GB cho T4) hoặc "none"
+  gemini_model: "gemini-3.8-flash" # Điểm cuối Gemini chính thức khi cần dùng Cloud API
   target_style: "horror_recap" # Style similar to Quán Khuya
   max_selected_panels: 35 # Filter 30-40 best dramatic panels per chapter
   min_drama_score: 7 # Scale 1 to 10
