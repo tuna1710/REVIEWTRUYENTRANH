@@ -8,6 +8,8 @@ import os
 import sys
 import yaml
 import argparse
+import shutil
+from datetime import datetime
 from pathlib import Path
 
 # Fix httpx NO_PROXY bug with IPv6 brackets
@@ -53,6 +55,20 @@ def run_pipeline(
 
     work_dir = Path("./workspace")
     work_dir.mkdir(parents=True, exist_ok=True)
+
+    # Clean workspace directories before starting new run to avoid mixing previous chapters
+    for sub in ["raw_pages", "panels", "audio", "subtitles", "rendered_scenes"]:
+        d = work_dir / sub
+        if d.exists():
+            for item in d.iterdir():
+                try:
+                    if item.is_file() or item.is_symlink():
+                        item.unlink()
+                    elif item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                except Exception:
+                    pass
+        d.mkdir(parents=True, exist_ok=True)
 
     # 2. Step 1: Download or Ingest Manga Pages
     print("\n--- [STEP 1/5] Ingesting Manga Chapter ---")
@@ -120,9 +136,13 @@ def run_pipeline(
     )
 
     rendered_scene_videos = []
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ratio_str = aspect_ratio.replace(":", "_")
+    final_output_file = work_dir / f"final_recap_{timestamp_str}_{ratio_str}.mp4"
+
     video_engine = VideoEngine(
         output_dir=str(work_dir / "rendered_scenes"),
-        final_output_path=str(work_dir / f"final_recap_video_{aspect_ratio.replace(':', '_')}.mp4"),
+        final_output_path=str(final_output_file),
         aspect_ratio=aspect_ratio
     )
 

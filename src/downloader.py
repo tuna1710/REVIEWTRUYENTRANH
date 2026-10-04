@@ -23,11 +23,25 @@ class MangaDownloader:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
+    def clean_output_dir(self):
+        """Cleans previous raw pages to avoid mixing different chapters."""
+        if self.output_dir.exists():
+            for item in self.output_dir.iterdir():
+                try:
+                    if item.is_file() or item.is_symlink():
+                        item.unlink()
+                    elif item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                except Exception:
+                    pass
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
     def download_from_url(self, url: str) -> List[str]:
         """
         Downloads manga images from a URL using gallery-dl or fallback scraper.
         Returns a sorted list of file paths.
         """
+        self.clean_output_dir()
         print(f"[Downloader] Downloading chapter from: {url}")
         
         # 1. Try gallery-dl first (supports 1000+ comic/manga websites)
@@ -59,6 +73,7 @@ class MangaDownloader:
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
+        self.clean_output_dir()
         print(f"[Downloader] Processing local source: {file_path}")
 
         # If it's a directory, copy and standardize images

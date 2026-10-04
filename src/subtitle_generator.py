@@ -39,6 +39,19 @@ class SubtitleGenerator:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.aspect_ratio = aspect_ratio
         self.model = None
+        self.clean_output_dir()
+
+    def clean_output_dir(self):
+        """Cleans previous subtitle files to avoid mixing subtitles between chapters."""
+        if self.output_dir.exists():
+            for item in self.output_dir.iterdir():
+                try:
+                    if item.is_file() or item.is_symlink():
+                        if item.name.startswith("scene_"):
+                            item.unlink()
+                except Exception:
+                    pass
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         if HAS_WHISPER:
             try:

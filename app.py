@@ -20,6 +20,7 @@ import zipfile
 from pathlib import Path
 import pandas as pd
 import gradio as gr
+from datetime import datetime
 
 # Fix httpx NO_PROXY bug with IPv6 brackets
 for _k in ["NO_PROXY", "no_proxy"]:
@@ -88,11 +89,24 @@ def process_auto_pipeline(
     audio_dir = storage_dir / "audio"
     sub_dir = storage_dir / "subtitles"
     scenes_dir = storage_dir / "rendered_scenes"
-    final_video_path = storage_dir / "final_recap_video.mp4"
-    draft_dir = storage_dir / "capcut_draft"
 
+    # Clean intermediate directories to prevent mixing with previous chapter
     for d in [raw_dir, panels_dir, audio_dir, sub_dir, scenes_dir]:
+        if d.exists():
+            for item in d.iterdir():
+                try:
+                    if item.is_file() or item.is_symlink():
+                        item.unlink()
+                    elif item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                except Exception:
+                    pass
         d.mkdir(parents=True, exist_ok=True)
+
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ratio_str = "9_16" if "9:16" in aspect_choice else "16_9"
+    final_video_path = storage_dir / f"final_recap_{timestamp_str}_{ratio_str}.mp4"
+    draft_dir = storage_dir / "capcut_draft"
 
     status_log = []
     def log(msg):
@@ -226,6 +240,15 @@ def step1_interactive_extract(manga_url: str, local_file, progress=gr.Progress(t
     raw_dir = storage_dir / "raw_pages"
     panels_dir = storage_dir / "panels"
     for d in [raw_dir, panels_dir]:
+        if d.exists():
+            for item in d.iterdir():
+                try:
+                    if item.is_file() or item.is_symlink():
+                        item.unlink()
+                    elif item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                except Exception:
+                    pass
         d.mkdir(parents=True, exist_ok=True)
 
     downloader = MangaDownloader(output_dir=str(raw_dir))
@@ -316,11 +339,23 @@ def step3_interactive_render(
     audio_dir = storage_dir / "audio"
     sub_dir = storage_dir / "subtitles"
     scenes_dir = storage_dir / "rendered_scenes"
-    final_video_path = storage_dir / "final_recap_video.mp4"
-    draft_dir = storage_dir / "capcut_draft"
 
     for d in [audio_dir, sub_dir, scenes_dir]:
+        if d.exists():
+            for item in d.iterdir():
+                try:
+                    if item.is_file() or item.is_symlink():
+                        item.unlink()
+                    elif item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                except Exception:
+                    pass
         d.mkdir(parents=True, exist_ok=True)
+
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ratio_str = "9_16" if "9:16" in aspect_ratio else "16_9"
+    final_video_path = storage_dir / f"final_recap_{timestamp_str}_{ratio_str}.mp4"
+    draft_dir = storage_dir / "capcut_draft"
 
     # Reconstruct timeline from edited dataframe
     scenes = []

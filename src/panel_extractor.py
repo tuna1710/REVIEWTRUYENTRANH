@@ -35,6 +35,19 @@ class MangaPanelExtractor:
         self.reading_order = reading_order.upper()
         self.model = None
 
+    def clean_output_dir(self):
+        """Cleans previous extracted panels to avoid mixing panels from different chapters."""
+        if self.output_dir.exists():
+            for item in self.output_dir.iterdir():
+                try:
+                    if item.is_file() or item.is_symlink():
+                        item.unlink()
+                    elif item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                except Exception:
+                    pass
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
         if HAS_ULTRALYTICS:
             try:
                 print(f"[Panel Extractor] Initializing YOLO model: {self.model_name}...")
@@ -65,6 +78,7 @@ class MangaPanelExtractor:
         """
         Processes a list of page images, extracts panels, and returns sorted metadata.
         """
+        self.clean_output_dir()
         all_panels = []
         global_panel_idx = 1
 

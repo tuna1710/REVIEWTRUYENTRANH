@@ -43,6 +43,20 @@ class VideoEngine:
         self.use_nvenc = use_nvenc
         self.fps = fps
         self.encoder = self._detect_encoder()
+        self.clean_output_dir()
+
+    def clean_output_dir(self):
+        """Cleans rendered scenes directory to prevent stitching old scene clips."""
+        if self.output_dir.exists():
+            for item in self.output_dir.iterdir():
+                try:
+                    if item.is_file() or item.is_symlink():
+                        item.unlink()
+                    elif item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                except Exception:
+                    pass
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def _detect_encoder(self) -> str:
         """

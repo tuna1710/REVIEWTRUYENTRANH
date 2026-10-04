@@ -42,6 +42,20 @@ class TTSEngine:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.sample_rate = sample_rate
         self.engine = None
+        self.clean_output_dir()
+
+    def clean_output_dir(self):
+        """Cleans previous audio files to avoid mixing audio between chapters."""
+        if self.output_dir.exists():
+            for item in self.output_dir.iterdir():
+                try:
+                    if item.is_file() or item.is_symlink():
+                        # Preserve preview sample if desired, or wipe all scene audio
+                        if item.name.startswith("scene_"):
+                            item.unlink()
+                except Exception:
+                    pass
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         if HAS_VIENEU:
             print("[TTS Engine] Initializing VieNeu-TTS-v3-Turbo...")
