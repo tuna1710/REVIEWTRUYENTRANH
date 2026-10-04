@@ -34,6 +34,8 @@ temp/
 # Whitelist asset files
 !assets/bgm/*.mp3
 !assets/sample_chapter.pdf
+!assets/mieruko_chan_ch01.cbz
+!assets/*.cbz
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints
