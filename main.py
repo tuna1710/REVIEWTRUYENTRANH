@@ -176,15 +176,13 @@ def run_pipeline(
         )
         rendered_scene_videos.append(scene_mp4)
 
-    # 6. Step 5: Final Video Assembly & BGM Ducking
-    print("\n--- [STEP 5/5] Final Video Assembly with Background Music & Ducking ---")
-    bgm_path = Path("assets/bgm/eerie_ambient.mp3")
+    # 6. Step 5: Final Video Assembly (Pure voice narration without BGM)
+    print("\n--- [STEP 5/5] Final Video Assembly (Pure Voice Narration) ---")
     final_video = video_engine.concatenate_scenes(
         scene_video_paths=rendered_scene_videos,
-        bgm_path=str(bgm_path) if bgm_path.exists() else None
+        bgm_path=None
     )
 
-    # Optional: CapCut Project Draft Export
     if export_capcut:
         print("\n--- [BONUS] Exporting CapCut / JianYing Project Draft ---")
         capcut_exp = CapCutExporter(output_dir=str(work_dir / "capcut_draft"))

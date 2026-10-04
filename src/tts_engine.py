@@ -183,21 +183,33 @@ class TTSEngine:
         else:
             voice_name = "vi-VN-NamMinhNeural"
 
+        temp_mp3 = Path(output_path).with_suffix(".temp.mp3")
         cmd = [
             "edge-tts",
             "--voice", voice_name,
             "--text", clean_text,
-            "--write-media", output_path
+            "--write-media", str(temp_mp3)
         ]
         try:
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            # Generate placeholder tone proportional to text length (~0.35s per word)
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            # Transcode to standard 48kHz 16-bit PCM WAV
+            trans_cmd = [
+                "ffmpeg", "-y",
+                "-i", str(temp_mp3),
+                "-ar", "48000", "-ac", "2",
+                "-c:a", "pcm_s16le",
+                str(output_path)
+            ]
+            subprocess.run(trans_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            temp_mp3.unlink(missing_ok=True)
+        except Exception as e:
+            temp_mp3.unlink(missing_ok=True)
+            print(f"[TTS Engine Notice] Edge-TTS offline or network blocked ({e}). Generating audible preview tone.")
             word_count = max(1, len(clean_text.split()))
             est_duration = max(3.0, word_count * 0.35)
             num_samples = int(self.sample_rate * est_duration)
             t = np.linspace(0, est_duration, num_samples, endpoint=False)
-            dummy = (0.05 * np.sin(2 * np.pi * 120 * t)).astype(np.float32)
+            dummy = (0.25 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
             sf.write(output_path, dummy, self.sample_rate)
 
         # Get duration using soundfile

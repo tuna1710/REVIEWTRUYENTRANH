@@ -16,9 +16,60 @@ from pydantic import BaseModel, Field
 from PIL import Image
 
 
+def _is_english_text(text: str) -> bool:
+    """
+    Detects if text contains primarily English speech bubbles or leaked thoughts.
+    """
+    if not text:
+        return False
+    en_words = {
+        'the', 'a', 'an', 'she', 'he', 'it', 'they', 'this', 'that', 'these', 'those',
+        'is', 'are', 'was', 'were', 'what', 'with', 'from', 'her', 'his', 'my', 'your',
+        'can', 'cant', 'cannot', 'could', 'thought', 'shiver', 'spine', 'monster',
+        'thing', 'down', 'oh', 'no', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'but',
+        'staring', 'looking', 'walking', 'scared', 'afraid', 'creature', 'behind', 'run',
+        'there', 'somebody', 'someone', 'please', 'help', 'why', 'who', 'how', 'me'
+    }
+    words = [re.sub(r'[^a-zA-Z]', '', w.lower()) for w in text.split()]
+    words = [w for w in words if w]
+    if not words:
+        return False
+    en_count = sum(1 for w in words if w in en_words)
+    return en_count >= 2 or (len(words) >= 4 and en_count / len(words) >= 0.25)
+
+
+def _contextual_vietnamese_horror(idx: int, total_scenes: int, synopsis: str = "") -> str:
+    """
+    Generates contextual, gripping Vietnamese horror narration when an LLM leaks English or truncated JSON.
+    Ensures 100% pure Vietnamese storytelling continuity across all scenes.
+    """
+    ratio = idx / max(1, total_scenes)
+    if ratio <= 0.3:
+        templates = [
+            "Bầu không khí u ám đến nghẹt thở bao trùm lấy không gian... Có điều gì đó bất thường đang âm thầm diễn ra.",
+            "Từng bước chân nặng trĩu trong sự im lặng đáng sợ, như thể có một ánh nhìn vô hình đang dõi theo từ trong bóng tối.",
+            "Không gian xung quanh dường như đông cứng lại, một luồng khí lạnh buốt bất ngờ ùa tới khiến ai nấy đều rùng mình."
+        ]
+    elif ratio <= 0.7:
+        templates = [
+            "Cảm giác ớn lạnh chạy dọc sống lưng... Một hình thù quái đản và dị hợm bất ngờ xuất hiện ngay trong tầm mắt.",
+            "Cô gái cố gắng kìm nén hơi thở, tim đập thình thịch và giả vờ như hoàn toàn không nhìn thấy sinh vật ghê rợn kia.",
+            "Thực thể ma quái ghé sát lại gần với hơi thở tanh tưởi, chỉ cần để lộ một chút hoảng sợ, hậu quả sẽ không thể lường trước.",
+            "Toàn thân cô tê dại vì sợ hãi nhưng đôi mắt vẫn phải nhìn thẳng về phía trước để che giấu sự hoảng loạn."
+        ]
+    else:
+        templates = [
+            "Áp lực kinh hoàng đè nặng từng giây từng phút khi quái vật bắt đầu nghi ngờ và tiến sát hơn nữa.",
+            "Một khoảnh khắc đối mặt sinh tử đầy nghẹt thở... Ranh giới giữa sự sống và cái chết chưa bao giờ mong manh đến thế.",
+            "Cơn ác mộng dường như vẫn chưa thể kết thúc, sự kinh hoàng tột độ vẫn tiếp tục đeo bám trong từng hơi thở."
+        ]
+    return templates[(idx - 1) % len(templates)]
+
+
 def _sanitize_vietnamese_text(text: str) -> str:
     """
-    Cleans up Chinese leaks and strips all bracket emotion tags (e.g. [thở dài], [tiếng thở dốc]).
+    Cleans up Chinese leaks, strips all bracket emotion tags (e.g. [thở dài], [tiếng thở dốc]),
+    and removes any leaked JSON tokens.
     Ensures 100% pure Vietnamese narration suitable for TTS narration.
     """
     if not text:
@@ -27,7 +78,12 @@ def _sanitize_vietnamese_text(text: str) -> str:
     # 1. Strip all bracket tags completely (e.g., [thở dài], [tiếng thở dốc], [hắng giọng], etc.)
     text = re.sub(r"\[[^\]]*\]", "", text)
 
-    # 2. Common Chinese leaks from Qwen visual tokenizer
+    # 2. Strip any leaked JSON key/syntax markers
+    text = re.sub(r'^\s*\{?\s*"dramatic_score"\s*:\s*\d+,?\s*', '', text)
+    text = re.sub(r'^\s*"?narration"?\s*:\s*["\']?', '', text)
+    text = re.sub(r'["\'\}]+\s*$', '', text)
+
+    # 3. Common Chinese leaks from Qwen visual tokenizer
     replacements = {
         "đồng phục校服": "đồng phục",
         "校服": "đồng phục",
@@ -52,16 +108,17 @@ def _sanitize_vietnamese_text(text: str) -> str:
     for zh, vi in replacements.items():
         text = text.replace(zh, vi)
 
-    # 3. Remove any remaining CJK unified ideographs
+    # 4. Remove any remaining CJK unified ideographs
     text = re.sub(r"[\u4e00-\u9fff]+", "", text)
 
-    # 4. Deduplicate duplicated words
+    # 5. Deduplicate duplicated words
     for phrase in ["đồng phục", "áo mưa", "chiếc ô", "quái vật", "bóng ma", "dưới mưa", "học sinh"]:
         text = text.replace(f"{phrase} {phrase}", phrase).replace(f"{phrase}{phrase}", phrase)
 
-    # 5. Clean up redundant spaces and punctuation spacing
+    # 6. Clean up redundant spaces and punctuation spacing
     text = re.sub(r"\s+([,.:;?!])", r"\1", text)
     text = re.sub(r"\s+", " ", text).strip()
+    text = text.strip('"\' ')
     return text
 
 
@@ -98,13 +155,13 @@ class ScriptGenerator:
             self.provider = "qwen_vl"
             self.model_name = raw_model or "Qwen/Qwen2.5-VL-7B-Instruct"
         else:
-            self.provider = provider.lower()
-            if self.provider == "qwen_vl":
-                self.model_name = raw_model or "Qwen/Qwen2.5-VL-7B-Instruct"
-            else:
+            self.provider = (provider or "qwen_vl").lower()
+            if self.provider == "gemini":
                 self.model_name = raw_model or "gemini-3.8-flash"
+            else:
+                self.model_name = raw_model or "Qwen/Qwen2.5-VL-7B-Instruct"
 
-        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
         self.output_file = Path(output_file)
         self.output_file.parent.mkdir(parents=True, exist_ok=True)
         self.quantization = quantization
@@ -117,16 +174,17 @@ class ScriptGenerator:
         max_scenes: int = 35
     ) -> Dict:
         """
-        Takes list of extracted panels, analyzes visual content, and returns structured timeline.
+        Orchestrates selection of panels and generation of dramatic Vietnamese recap script.
         """
         print(f"[Script Generator] Generating recap script via provider '{self.provider}' (model: {self.model_name})...")
 
-        if self.provider == "qwen_vl":
-            return self._generate_with_qwen_vl(panels_metadata, story_synopsis, min_score, max_scenes)
-        elif self.provider == "gemini":
+        if self.provider == "gemini":
             return self._generate_with_gemini(panels_metadata, story_synopsis, min_score, max_scenes)
+        elif self.provider == "qwen_vl":
+            return self._generate_qwen_vl(panels_metadata, story_synopsis, min_score, max_scenes)
         else:
-            raise ValueError(f"Unsupported provider: {self.provider}")
+            print(f"[Script Generator] Unsupported provider '{self.provider}'. Falling back to simulation.")
+            return self._generate_simulation(panels_metadata, story_synopsis, min_score, max_scenes, note="simulation (Unsupported provider)")
 
     def _generate_simulation(
         self,
@@ -143,7 +201,7 @@ class ScriptGenerator:
             selected_scenes.append({
                 "panel_file": p["file_name"],
                 "dramatic_score": 8,
-                "narration": f"Khung cảnh thứ {idx} chìm trong bóng tối và sự im lặng rợn người... Điều kinh hoàng đang dần lộ diện.",
+                "narration": _contextual_vietnamese_horror(idx, min(len(panels), max_scenes), synopsis),
                 "camera_motion": "zoom_in" if idx % 2 == 1 else "pan_left",
                 "sfx_cue": "heart_beat" if idx % 2 == 1 else "creepy_whisper"
             })
@@ -189,7 +247,8 @@ class ScriptGenerator:
             "1. Quan sát kỹ từng khung tranh (panel) được gắn thẻ tên file rõ ràng.\n"
             "2. Đánh giá độ kịch tính và ý nghĩa của tranh theo thang điểm 1-10.\n"
             "3. LỌC BỎ các tranh phụ, khung cảnh tĩnh không quan trọng. CHỈ CHỌN các tranh có điểm kịch tính cao (>= 7).\n"
-            "4. Với mỗi tranh được chọn, viết lời bình dẫn chuyện bằng tiếng Việt mang giọng điệu trầm, bí ẩn, rùng rợn và kích thích trí tò mò.\n"
+            "4. Với mỗi tranh được chọn, viết lời bình dẫn chuyện 100% BẰNG TIẾNG VIỆT mang giọng điệu trầm, bí ẩn, rùng rợn và kích thích trí tò mò.\n"
+            "   TUYỆT ĐỐI KHÔNG VIẾT TIẾNG ANH dù trong tranh có chữ tiếng Anh hay tiếng Nhật.\n"
             "5. BẮT BUỘC trả về đúng chính xác trường 'panel_file' theo đúng tên file tương ứng với khung tranh bạn chọn.\n"
             "6. Diễn biến câu chuyện phải nối tiếp liền mạch, không lặp lại mô tả ở các cảnh liên tiếp. TUYỆT ĐỐI KHÔNG dùng bất kỳ thẻ cảm xúc nào trong ngoặc vuông như [thở dài] hay [tiếng thở dốc]."
         )
@@ -215,7 +274,7 @@ class ScriptGenerator:
                     print(f"Warning: could not open image {p['file_path']}: {e}")
 
             contents_payload.append(
-                "Hãy chọn các cảnh đắt giá nhất (dramatic_score >= 7), viết lời bình tiếng Việt rùng rợn thuần túy (không kèm tag [thở dài]), "
+                "Hãy chọn các cảnh đắt giá nhất (dramatic_score >= 7), viết lời bình 100% tiếng Việt rùng rợn thuần túy (không dùng tiếng Anh, không kèm tag [thở dài]), "
                 "đề xuất camera motion và sfx, đảm bảo trường 'panel_file' đúng chính xác tên file đã gửi."
             )
 
@@ -239,7 +298,11 @@ class ScriptGenerator:
 
                 for sc in data.get("scenes", []):
                     if sc.get("dramatic_score", 0) >= min_score:
-                        sc["narration"] = _sanitize_vietnamese_text(sc.get("narration", ""))
+                        raw_narr = sc.get("narration", "")
+                        clean_narr = _sanitize_vietnamese_text(raw_narr)
+                        if _is_english_text(clean_narr):
+                            clean_narr = _contextual_vietnamese_horror(len(selected_scenes) + 1, max_scenes, synopsis)
+                        sc["narration"] = clean_narr
                         selected_scenes.append(sc)
             except Exception as e:
                 print(f"[Script Generator] Batch failed: {e}. Generating fallback entries for this batch.")
@@ -247,7 +310,7 @@ class ScriptGenerator:
                     selected_scenes.append({
                         "panel_file": p["file_name"],
                         "dramatic_score": 7,
-                        "narration": "Cơn ác mộng lại tiếp diễn trong tĩnh lặng... Sự nguy hiểm cận kề.",
+                        "narration": _contextual_vietnamese_horror(len(selected_scenes) + 1, max_scenes, synopsis),
                         "camera_motion": "zoom_in",
                         "sfx_cue": "heart_beat"
                     })
@@ -267,7 +330,7 @@ class ScriptGenerator:
         print(f"[Script Generator] Successfully generated {len(selected_scenes)} selected scenes in {self.output_file}")
         return final_timeline
 
-    def _generate_with_qwen_vl(
+    def _generate_qwen_vl(
         self,
         panels: List[Dict],
         synopsis: str,
@@ -275,8 +338,8 @@ class ScriptGenerator:
         max_scenes: int
     ) -> Dict:
         """
-        Offline local inference using Qwen2.5-VL (3B or 7B-Instruct with 4-bit quantization).
-        Optimized with narrative continuity memory, sampling, repetition penalty, and VRAM cleanup.
+        Executes local Vision-LLM (Qwen2.5-VL-7B-Instruct) using 4-bit quantization on Colab GPU.
+        Outputs 100% pure Vietnamese narration, completely eliminating English leaks and bracket emotion tags.
         """
         model_id = self.model_name or "Qwen/Qwen2.5-VL-7B-Instruct"
         print(f"[Script Generator] Initializing local Vision-LLM: {model_id}...")
@@ -367,38 +430,52 @@ class ScriptGenerator:
                         f"Diễn biến cảnh vừa rồi bạn đã kể: '{previous_narration}'.\n"
                         "Nhiệm vụ cho cảnh này:\n"
                         "1. Quan sát hình ảnh và viết câu diễn biến TIẾP THEO để câu chuyện phát triển liền mạch.\n"
-                        "2. TUYỆT ĐỐI KHÔNG sử dụng bất kỳ thẻ biểu cảm nào trong ngoặc vuông như [thở dài], [tiếng thở dốc] hay [hắng giọng].\n"
-                        "3. TUYỆT ĐỐI KHÔNG lặp lại việc miêu tả ngoại hình, quần áo, thời tiết mưa nếu cảnh trước đã đề cập.\n"
-                        "4. Tập trung vào: hành động mới của nhân vật, nỗi sợ hãi gia tăng, hoặc điều kinh hoàng mới xuất hiện."
+                        "2. BẮT BUỘC 100% TIẾNG VIỆT. TUYỆT ĐỐI KHÔNG VIẾT TIẾNG ANH hay tiếng Trung.\n"
+                        "3. TUYỆT ĐỐI KHÔNG sử dụng bất kỳ thẻ biểu cảm nào trong ngoặc vuông như [thở dài], [tiếng thở dốc] hay [hắng giọng].\n"
+                        "4. TUYỆT ĐỐI KHÔNG lặp lại việc miêu tả ngoại hình, quần áo, thời tiết mưa nếu cảnh trước đã đề cập.\n"
+                        "5. Tập trung vào: hành động mới của nhân vật, nỗi sợ hãi gia tăng, hoặc điều kinh hoàng mới xuất hiện."
                     )
                 else:
                     context_instruction = (
                         "Nhiệm vụ: Đây là cảnh mở đầu. Hãy bắt đầu câu chuyện một cách hồi hộp, rùng rợn và kích thích trí tò mò.\n"
+                        "- BẮT BUỘC 100% TIẾNG VIỆT HOÀN TOÀN.\n"
                         "- TUYỆT ĐỐI KHÔNG sử dụng bất kỳ thẻ biểu cảm nào như [thở dài] hay dấu ngoặc vuông. Hãy dùng câu dẫn chuyện điện ảnh thuần túy."
                     )
 
                 system_prompt = (
-                    "Bạn là biên kịch kiêm đạo diễn video recap truyện tranh phong cách kinh dị giật gân (Quán Khuya).\n"
+                    "Bạn là biên kịch kiêm đạo diễn video recap truyện tranh kinh dị giật gân (phong cách Quán Khuya).\n"
+                    "QUY TẮC BẮT BUỘC SỐNG CÒN:\n"
+                    "1. NGÔN NGỮ: 100% TIẾNG VIỆT HOÀN TOÀN. Mặc dù các khung tranh truyện tranh có thể có chữ tiếng Anh hoặc tiếng Nhật, bạn TUYỆT ĐỐI KHÔNG ĐƯỢC viết lời dẫn (narration) bằng tiếng Anh. Mọi suy nghĩ, đối thoại và hành động trong tranh đều PHẢI được chuyển tải thành lời kể chuyện tiếng Việt rùng rợn, lôi cuốn.\n"
+                    "2. TUYỆT ĐỐI KHÔNG DÙNG THẺ BIỂU CẢM TRONG NGOẶC VUÔNG (như [thở dài], [tiếng thở dốc], [hắng giọng]). Chỉ viết câu dẫn chuyện điện ảnh thuần túy.\n"
+                    "3. CHỈ TRẢ VỀ DUY NHẤT một chuỗi JSON hợp lệ không kèm bất kỳ giải thích bên ngoài nào."
+                )
+
+                user_prompt = (
                     f"Bối cảnh tổng thể: {synopsis or 'Không khí căng thẳng, u ám, bí ẩn kinh dị'}.\n"
                     f"{context_instruction}\n"
-                    "Quy tắc ngôn ngữ:\n"
-                    "- 100% tiếng Việt tự nhiên, sinh động, không rò rỉ bất kỳ từ Hán tự/tiếng Trung nào.\n"
-                    "- TUYỆT ĐỐI KHÔNG dùng thẻ biểu cảm trong ngoặc vuông (như [thở dài], [tiếng thở dốc]). Chỉ viết lời đọc truyện thuần túy.\n"
-                    "- Chỉ trả về DUY NHẤT một khối JSON hợp lệ theo cấu trúc sau:\n"
+                    "Nhiệm vụ: Quan sát khung tranh và viết lời dẫn chuyện 'narration' BẰNG TIẾNG VIỆT.\n"
+                    "LƯU Ý QUAN TRỌNG: TUYỆT ĐỐI KHÔNG VIẾT TIẾNG ANH (DO NOT USE ENGLISH). Dù tranh có chữ tiếng Anh, trường 'narration' BẮT BUỘC phải là 100% tiếng Việt.\n"
+                    "Cấu trúc JSON bắt buộc:\n"
                     "{\n"
                     '  "dramatic_score": <số nguyên từ 1 đến 10>,\n'
-                    '  "narration": "<câu kể chuyện tiếng Việt rùng rợn thuần túy, nối tiếp mạch truyện>",\n'
-                    '  "camera_motion": "<chọn 1 trong: zoom_in, zoom_out, pan_left, pan_right>",\n'
-                    '  "sfx_cue": "<chọn 1 trong: heart_beat, door_creak, creepy_whisper, jumpscare, none>"\n'
+                    '  "narration": "<câu kể chuyện tiếng Việt rùng rợn thuần túy, tuyệt đối không có tiếng Anh>",\n'
+                    '  "camera_motion": "<zoom_in|zoom_out|pan_left|pan_right>",\n'
+                    '  "sfx_cue": "<heart_beat|door_creak|creepy_whisper|jumpscare|none>"\n'
                     "}"
                 )
 
                 messages = [
                     {
+                        "role": "system",
+                        "content": [
+                            {"type": "text", "text": system_prompt}
+                        ]
+                    },
+                    {
                         "role": "user",
                         "content": [
                             {"type": "image", "image": img},
-                            {"type": "text", "text": system_prompt}
+                            {"type": "text", "text": user_prompt}
                         ]
                     }
                 ]
@@ -417,7 +494,7 @@ class ScriptGenerator:
                 with torch.no_grad():
                     generated_ids = model.generate(
                         **inputs,
-                        max_new_tokens=180,
+                        max_new_tokens=320,
                         do_sample=True,
                         temperature=0.7,
                         top_p=0.85,
@@ -452,15 +529,27 @@ class ScriptGenerator:
                         motion = str(data.get("camera_motion", motion)).strip()
                         sfx = str(data.get("sfx_cue", sfx)).strip()
                     except Exception:
-                        narration = cleaned
-                else:
-                    narration = cleaned
+                        pass
 
-                # Sanitize Vietnamese text: strip all brackets, leaks, and duplicate words
+                # If JSON was truncated or malformed, extract narration field cleanly
+                if not narration:
+                    narr_match = re.search(r'["\']narration["\']\s*:\s*["\']([^"\'\n\r]+)', cleaned)
+                    if narr_match:
+                        narration = narr_match.group(1).strip()
+                    else:
+                        narration = cleaned
+
+                # Sanitize Vietnamese text: strip all brackets, JSON leaks, and duplicate words
                 narration = _sanitize_vietnamese_text(narration)
 
+                # English leak detector & automatic Vietnamese fallback
+                if _is_english_text(narration):
+                    vi_replacement = _contextual_vietnamese_horror(idx, len(candidate_panels), synopsis)
+                    print(f"  [Qwen-VL] ⚠️ English leak detected in scene {idx} ('{narration[:35]}...'). Replaced with pure Vietnamese narration.")
+                    narration = vi_replacement
+
                 if not narration or len(narration) < 10:
-                    narration = "Sự tĩnh lặng rợn người bao trùm lấy không gian... Điều bất thường đang dần lộ diện."
+                    narration = _contextual_vietnamese_horror(idx, len(candidate_panels), synopsis)
 
                 if score >= min_score or len(selected_scenes) < 5:
                     selected_scenes.append({
@@ -481,7 +570,7 @@ class ScriptGenerator:
                 selected_scenes.append({
                     "panel_file": p["file_name"],
                     "dramatic_score": 7,
-                    "narration": "Cơn ác mộng lại tiếp diễn trong tĩnh lặng... Sự nguy hiểm cận kề.",
+                    "narration": _contextual_vietnamese_horror(idx, len(candidate_panels), synopsis),
                     "camera_motion": "zoom_in",
                     "sfx_cue": "heart_beat"
                 })

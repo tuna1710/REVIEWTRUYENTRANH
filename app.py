@@ -205,10 +205,10 @@ def process_auto_pipeline(
 
     # 5. Concatenate & CapCut
     progress(0.92, desc="Ghép video & hòa âm BGM...")
-    bgm_path = BASE_DIR / "assets" / "bgm" / "eerie_ambient.mp3"
+    bgm_path = None
     final_output = video_engine.concatenate_scenes(
         scene_video_paths=rendered_scenes,
-        bgm_path=str(bgm_path) if bgm_path.exists() else None
+        bgm_path=None
     )
     log(f"🎉 Xuất video hoàn tất ({aspect_ratio}): {final_output}")
 
@@ -411,10 +411,10 @@ def step3_interactive_render(
         )
         rendered_scenes.append(scene_mp4)
 
-    bgm_path = BASE_DIR / "assets" / "bgm" / "eerie_ambient.mp3"
+    bgm_path = None
     final_output = video_engine.concatenate_scenes(
         scene_video_paths=rendered_scenes,
-        bgm_path=str(bgm_path) if bgm_path.exists() else None
+        bgm_path=None
     )
 
     capcut_zip_path = None

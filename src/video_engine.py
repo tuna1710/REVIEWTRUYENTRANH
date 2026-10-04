@@ -89,24 +89,27 @@ class VideoEngine:
         duration: Optional[float] = None
     ) -> str:
         """
-        Renders a single scene with Ken Burns pan/zoom, blurred background, and subtitles.
+        Renders a single scene with Ken Burns pan/zoom, blurred background, ASS subtitles,
+        and standardized 48kHz stereo AAC audio with faststart.
         """
         out_mp4 = self.output_dir / f"scene_{scene_id:04d}.mp4"
 
         # Determine audio duration if not provided
         if duration is None or duration <= 0:
-            probe_cmd = f"ffprobe -v error -show_entries format=duration -of json \"{audio_path}\""
+            probe_cmd = f'ffprobe -v error -show_entries format=duration -of json "{audio_path}"'
             try:
                 res = subprocess.check_output(probe_cmd, shell=True)
-                duration = float(json.loads(res)['format']['duration'])
+                duration = float(json.loads(res)["format"]["duration"])
             except Exception:
-                duration = 5.0 # fallback
+                duration = 4.0
 
-        total_frames = max(1, int(duration * self.fps))
+        # Safety padding to ensure last subtitle word is not cut off
+        duration = round(duration + 0.15, 2)
+        total_frames = int(duration * self.fps)
 
-        # Configure Ken Burns zoom formula
+        # Dynamic Ken Burns expressions
         if camera_motion == "zoom_in":
-            zoom_expr = "min(zoom+0.0015,1.25)"
+            zoom_expr = "min(pzoom+0.0015,1.25)"
             x_expr = "iw/2-(iw/zoom/2)"
             y_expr = "ih/2-(ih/zoom/2)"
         elif camera_motion == "zoom_out":
@@ -114,10 +117,14 @@ class VideoEngine:
             x_expr = "iw/2-(iw/zoom/2)"
             y_expr = "ih/2-(ih/zoom/2)"
         elif camera_motion == "pan_left":
-            zoom_expr = "1.2"
-            x_expr = f"max(0, (iw-iw/zoom)*(1-on/{total_frames}))"
+            zoom_expr = "1.15"
+            x_expr = "max(0,in_w-in_w/zoom-(on*2))"
             y_expr = "ih/2-(ih/zoom/2)"
-        else: # static / default
+        elif camera_motion == "pan_right":
+            zoom_expr = "1.15"
+            x_expr = "min(in_w-in_w/zoom,on*2)"
+            y_expr = "ih/2-(ih/zoom/2)"
+        else:  # static / default
             zoom_expr = "1.05"
             x_expr = "iw/2-(iw/zoom/2)"
             y_expr = "ih/2-(ih/zoom/2)"
@@ -150,7 +157,8 @@ class VideoEngine:
                 "-c:v", encoder,
                 "-preset", "p4" if encoder == "h264_nvenc" else "veryfast",
                 "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "192k",
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                "-movflags", "+faststart",
                 "-t", str(duration),
                 str(out_mp4)
             ]
@@ -178,7 +186,8 @@ class VideoEngine:
                     "-c:v", "libx264",
                     "-preset", "veryfast",
                     "-pix_fmt", "yuv420p",
-                    "-c:a", "aac", "-b:a", "192k",
+                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                    "-movflags", "+faststart",
                     "-t", str(duration),
                     str(out_mp4)
                 ]
@@ -193,7 +202,8 @@ class VideoEngine:
         bgm_volume_db: int = -18
     ) -> str:
         """
-        Concatenates all scene MP4 files and blends background music (BGM).
+        Concatenates all scene MP4 files. Pure voice narration by default (BGM disabled per user directive).
+        Guarantees 100% audible, continuous 48kHz stereo AAC audio across all clips.
         """
         print(f"[Video Engine] Stitching {len(scene_video_paths)} scene clips ({self.aspect_ratio}) into final video...")
         concat_txt = self.output_dir / "concat_list.txt"
@@ -201,37 +211,52 @@ class VideoEngine:
             for p in scene_video_paths:
                 f.write(f"file '{Path(p).resolve().as_posix()}'\n")
 
-        temp_combined = self.output_dir / "temp_combined.mp4"
+        # If BGM is disabled (default per user directive: 'bỏ luôn nhạc nền đi')
+        if not bgm_path or not os.path.exists(bgm_path):
+            print("[Video Engine] Rendering pure voice recap video (No BGM)...")
+            cmd_concat = [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", str(concat_txt),
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                "-movflags", "+faststart",
+                str(self.final_output_path)
+            ]
+            subprocess.run(cmd_concat, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            print(f"[Video Engine] Master video rendered successfully: {self.final_output_path}")
+            return str(self.final_output_path)
 
-        # Concat demuxer (lossless & instant)
+        # If BGM is explicitly requested
+        temp_combined = self.output_dir / "temp_combined.mp4"
         cmd_concat = [
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0",
             "-i", str(concat_txt),
-            "-c", "copy",
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
             str(temp_combined)
         ]
-        subprocess.run(cmd_concat, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(cmd_concat, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
-        # Blend BGM if present
-        if bgm_path and os.path.exists(bgm_path):
-            print(f"[Video Engine] Mixing ambient horror BGM: {bgm_path} (volume: {bgm_volume_db}dB)...")
-            cmd_mix = [
-                "ffmpeg", "-y",
-                "-i", str(temp_combined),
-                "-stream_loop", "-1", "-i", str(Path(bgm_path).resolve()),
-                "-filter_complex",
-                f"[1:a]volume={bgm_volume_db}dB[bgm];[0:a][bgm]amix=inputs=2:duration=first[a]",
-                "-map", "0:v",
-                "-map", "[a]",
-                "-c:v", "copy",
-                "-c:a", "aac", "-b:a", "192k",
-                str(self.final_output_path)
-            ]
-            subprocess.run(cmd_mix, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            temp_combined.unlink(missing_ok=True)
-        else:
-            shutil.move(str(temp_combined), str(self.final_output_path))
+        print(f"[Video Engine] Mixing ambient horror BGM: {bgm_path} (volume: {bgm_volume_db}dB)...")
+        cmd_mix = [
+            "ffmpeg", "-y",
+            "-i", str(temp_combined),
+            "-stream_loop", "-1", "-i", str(Path(bgm_path).resolve()),
+            "-filter_complex",
+            f"[0:a]aresample=48000,aformat=channel_layouts=stereo[voice];"
+            f"[1:a]volume={bgm_volume_db}dB,aresample=48000,aformat=channel_layouts=stereo[bgm];"
+            f"[voice][bgm]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]",
+            "-map", "0:v",
+            "-map", "[a]",
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",
+            str(self.final_output_path)
+        ]
+        subprocess.run(cmd_mix, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        temp_combined.unlink(missing_ok=True)
 
         print(f"[Video Engine] Master video rendered successfully: {self.final_output_path}")
         return str(self.final_output_path)
