@@ -31,7 +31,7 @@ def run_pipeline(
     source_input: str,
     gemini_api_key: str = None,
     story_synopsis: str = "",
-    voice_preset: str = "NamMinh",
+    voice_preset: str = "Thiện Minh",
     reference_audio: str = None,
     export_capcut: bool = False,
     aspect_ratio: str = "16:9",
@@ -166,7 +166,7 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="URL of chapter or path to .zip/.cbz/.pdf/folder")
     parser.add_argument("--api-key", default=None, help="Google Gemini API key")
     parser.add_argument("--synopsis", default="", help="Brief story context")
-    parser.add_argument("--voice", default="NamMinh", help="TTS voice preset")
+    parser.add_argument("--voice", default="Thiện Minh", help="TTS voice preset")
     parser.add_argument("--ref-audio", default=None, help="Audio file for voice cloning")
     parser.add_argument("--capcut", action="store_true", help="Also export CapCut draft")
     parser.add_argument("--aspect-ratio", default="16:9", choices=["16:9", "9:16"], help="Video aspect ratio: 16:9 or 9:16")

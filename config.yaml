@@ -30,7 +30,7 @@ script_generator:
 # Text-To-Speech Settings (VieNeu-TTS-v3-Turbo)
 tts:
   model_id: "pnnbao-ump/VieNeu-TTS-v3-Turbo"
-  voice_preset: "NamMinh" # Options: NamMinh, BacMinh, TrungNam, etc.
+  voice_preset: "Thiện Minh" # Options: NamMinh, BacMinh, TrungNam, etc.
   reference_audio: "" # Path to 3-5s reference audio if voice cloning is desired
   sample_rate: 48000
   speed: 1.0

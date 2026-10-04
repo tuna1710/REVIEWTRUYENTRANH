@@ -470,8 +470,8 @@ def create_ui():
                             with gr.Row():
                                 auto_voice = gr.Dropdown(
                                     label="Giọng Đọc VieNeu-TTS (48kHz)",
-                                    choices=["NamMinh (Trầm ấm - Kịch tính)", "BacMinh (Rõ ràng - Truyền cảm)", "TrungNam (Bí ẩn)"],
-                                    value="NamMinh (Trầm ấm - Kịch tính)"
+                                    choices=["Thiện Minh (Trầm ấm, rùng rợn - Chuẩn Quán Khuya)", "Minh Đức (Miền Bắc, rõ ràng, kịch tính)", "Hải Đăng (Nam tính, bí ẩn)", "Quang Sơn (Mạnh mẽ, dồn dập)", "Thùy Dung (Giọng Nữ u uất, truyền cảm)", "Mai Anh (Giọng Nữ kịch tính)", "Quốc Tuấn (Chững chạc)", "Minh Triết (Trầm tĩnh)"],
+                                    value="Thiện Minh (Trầm ấm, rùng rợn - Chuẩn Quán Khuya)"
                                 )
                                 auto_camera = gr.Dropdown(
                                     label="Hiệu Ứng Chuyển Động Camera",
@@ -576,8 +576,8 @@ def create_ui():
                         )
                         dir_voice = gr.Dropdown(
                             label="Giọng Đọc Kể Chuyện",
-                            choices=["NamMinh (Trầm ấm - Kịch tính)", "BacMinh (Rõ ràng - Truyền cảm)", "TrungNam (Bí ẩn)"],
-                            value="NamMinh (Trầm ấm - Kịch tính)"
+                            choices=["Thiện Minh (Trầm ấm, rùng rợn - Chuẩn Quán Khuya)", "Minh Đức (Miền Bắc, rõ ràng, kịch tính)", "Hải Đăng (Nam tính, bí ẩn)", "Quang Sơn (Mạnh mẽ, dồn dập)", "Thùy Dung (Giọng Nữ u uất, truyền cảm)", "Mai Anh (Giọng Nữ kịch tính)", "Quốc Tuấn (Chững chạc)", "Minh Triết (Trầm tĩnh)"],
+                            value="Thiện Minh (Trầm ấm, rùng rợn - Chuẩn Quán Khuya)"
                         )
                         dir_capcut = gr.Checkbox(label="Xuất CapCut PC Project (.zip)", value=True)
 

@@ -1,6 +1,7 @@
 """
 Module 4A: TTS Engine (VieNeu-TTS-v3-Turbo & Edge-TTS Fallback)
 High-fidelity 48kHz Vietnamese speech synthesis with emotion tags and instant voice cloning.
+Supports full official VieNeu voice catalog (Thiện Minh, Minh Đức, Hải Đăng, Quang Sơn, Thùy Dung, etc.).
 """
 
 import os
@@ -17,11 +18,20 @@ try:
 except ImportError:
     HAS_VIENEU = False
 
+# Official VieNeu Voice Catalog
+VIENEU_VOICES = [
+    'Thiện Minh', 'Minh Đức', 'Hải Đăng', 'Quang Sơn', 'Thùy Dung',
+    'Mai Anh', 'Phạm Tuyên', 'Thái Sơn', 'Xuân Vĩnh', 'Thanh Bình',
+    'Ngọc Linh', 'Đoan Trang', 'Thục Đoan', 'Minh Triết', 'Mỹ Duyên',
+    'Quỳnh Anh', 'Đức Trí', 'Kim Thanh', 'Adam', 'Quốc Tuấn', 'Trúc Ly',
+    'Thiền Tâm Đức', 'Ngọc Huyền', 'Ngọc Trân', 'Adam bựa'
+]
+
 
 class TTSEngine:
     def __init__(
         self,
-        voice_preset: str = "NamMinh",
+        voice_preset: str = "Thiện Minh",
         reference_audio: Optional[str] = None,
         output_dir: str = "./workspace/audio",
         sample_rate: int = 48000
@@ -40,15 +50,41 @@ class TTSEngine:
             except Exception as e:
                 print(f"[TTS Engine] Notice initializing VieNeu: {e}")
 
+    def _resolve_voice(self, name: str) -> str:
+        """
+        Resolves voice name from UI string or legacy aliases to official VieNeu voice name.
+        """
+        if not name:
+            return "Thiện Minh"
+
+        # Check exact matches against VieNeu catalog
+        for v in VIENEU_VOICES:
+            if v.lower() in name.lower():
+                return v
+
+        # Legacy alias mappings
+        lower = name.lower()
+        if "bacminh" in lower or "bac" in lower:
+            return "Minh Đức"
+        if "namminh" in lower or "nam" in lower:
+            return "Thiện Minh"
+        if "trung" in lower:
+            return "Hải Đăng"
+        if "nu" in lower or "female" in lower:
+            return "Thùy Dung"
+
+        return "Thiện Minh"
+
     def preview_voice(self, sample_text: str = "Chào mừng bạn đến với Quán Khuya, nơi những câu chuyện rùng rợn bắt đầu...") -> str:
         """
         Quick voice audition without rendering full chapter scenes.
         """
         preview_path = self.output_dir / "voice_sample_preview.wav"
-        print(f"[TTS Engine] Synthesizing preview audition: \"{sample_text[:40]}...\"")
+        clean_voice = self._resolve_voice(self.voice_preset)
+        print(f"[TTS Engine] Synthesizing preview audition (Voice: '{clean_voice}'): \"{sample_text[:40]}...\"")
+
         if self.engine is not None:
             try:
-                clean_voice = self.voice_preset.split(" ")[0].strip()
                 if self.reference_audio and os.path.exists(self.reference_audio):
                     result = self.engine.infer(text=sample_text, ref_audio=self.reference_audio, denoise=True)
                 else:
@@ -77,13 +113,13 @@ class TTSEngine:
         """
         out_filename = f"scene_{scene_id:04d}.wav"
         out_path = self.output_dir / out_filename
+        clean_voice = self._resolve_voice(self.voice_preset)
 
-        print(f"[TTS Engine] Synthesizing Scene {scene_id}: \"{text[:40]}...\"")
+        print(f"[TTS Engine] Synthesizing Scene {scene_id} (Voice: '{clean_voice}'): \"{text[:40]}...\"")
 
         # 1. Try VieNeu-TTS-v3-Turbo
         if self.engine is not None:
             try:
-                clean_voice = self.voice_preset.split(" ")[0].strip()
                 if self.reference_audio and os.path.exists(self.reference_audio):
                     result = self.engine.infer(
                         text=text,
@@ -110,7 +146,7 @@ class TTSEngine:
                 duration = len(audio_array) / float(sr)
                 return {"audio_path": str(out_path), "duration": duration}
             except Exception as e:
-                print(f"[TTS Engine] VieNeu synthesis error: {e}. Attempting edge-tts fallback...")
+                print(f"[TTS Engine] VieNeu synthesis notice: {e}. Attempting edge-tts fallback...")
 
         # 2. Fallback using edge-tts (Vietnamese neural voice)
         duration = self._fallback_edge_tts(text, str(out_path))
@@ -124,9 +160,14 @@ class TTSEngine:
         if not clean_text:
             clean_text = "..."
 
-        voice_name = "vi-VN-NamMinhNeural"
-        if "bac" in self.voice_preset.lower() or "hoaimy" in self.voice_preset.lower():
+        # Select female or male edge-tts neural voice based on preset
+        female_keywords = ["dung", "anh", "huyen", "tran", "ly", "linh", "trang", "doan", "duyen", "thanh"]
+        clean_voice = self._resolve_voice(self.voice_preset).lower()
+
+        if any(k in clean_voice for k in female_keywords):
             voice_name = "vi-VN-HoaiMyNeural"
+        else:
+            voice_name = "vi-VN-NamMinhNeural"
 
         cmd = [
             "edge-tts",
