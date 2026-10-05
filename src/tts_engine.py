@@ -266,7 +266,7 @@ class TTSEngine:
             # Attempt B: CLI invocation fallback
             try:
                 cmd = [
-                    "edge-tts",
+                    sys.executable, "-m", "edge_tts",
                     "--voice", voice_name,
                     "--text", clean_text,
                     "--write-media", str(temp_mp3)
