@@ -13,9 +13,10 @@ from datetime import datetime
 from pathlib import Path
 
 # Fix httpx NO_PROXY bug with IPv6 brackets
-for _k in ["NO_PROXY", "no_proxy"]:
-    if _k in os.environ and "::1" in os.environ[_k]:
-        os.environ[_k] = os.environ[_k].replace(",[::1]", "").replace(",::1", "").replace("[::1]", "").replace("::1", "")
+for _k in ["NO_PROXY", "no_proxy", "GLOBAL_AGENT_NO_PROXY"]:
+    if _k in os.environ:
+        parts = [p.strip() for p in os.environ[_k].split(",") if p.strip() and "::" not in p and "[" not in p]
+        os.environ[_k] = ",".join(parts)
 
 # Add src to python path
 sys.path.append(str(Path(__file__).parent))

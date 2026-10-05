@@ -5,7 +5,16 @@ Supports full official VieNeu voice catalog (Thiện Minh, Minh Đức, Hải Đ
 """
 
 import os
+import sys
+
+# Comprehensive sanitization of NO_PROXY to prevent httpx/huggingface IPv6 port parsing crash
+for _k in ["NO_PROXY", "no_proxy", "GLOBAL_AGENT_NO_PROXY"]:
+    if _k in os.environ:
+        parts = [p.strip() for p in os.environ[_k].split(",") if p.strip() and "::" not in p and "[" not in p]
+        os.environ[_k] = ",".join(parts)
+
 import re
+import shutil
 import subprocess
 import numpy as np
 from pathlib import Path
@@ -44,13 +53,35 @@ class TTSEngine:
         self.engine = None
         self.clean_output_dir()
 
+    def _fix_hf_cache_symlinks(self):
+        """
+        Fixes HuggingFace Hub symlink issue on Linux/Colab where ONNX Runtime rejects
+        external data file paths ('External data path escapes model directory').
+        Replaces cross-directory symlinks in the snapshot directory with hardlinks or copies.
+        """
+        try:
+            hf_cache = Path.home() / ".cache" / "huggingface" / "hub"
+            if not hf_cache.exists():
+                return
+            for snap_dir in hf_cache.glob("**/snapshots/*"):
+                for p in snap_dir.rglob("*"):
+                    if p.is_symlink():
+                        target = p.resolve()
+                        if target.exists():
+                            p.unlink()
+                            try:
+                                os.link(target, p)
+                            except Exception:
+                                shutil.copyfile(target, p)
+        except Exception:
+            pass
+
     def clean_output_dir(self):
         """Cleans previous audio files to avoid mixing audio between chapters."""
         if self.output_dir.exists():
             for item in self.output_dir.iterdir():
                 try:
                     if item.is_file() or item.is_symlink():
-                        # Preserve preview sample if desired, or wipe all scene audio
                         if item.name.startswith("scene_"):
                             item.unlink()
                 except Exception:
@@ -62,7 +93,17 @@ class TTSEngine:
             try:
                 self.engine = Vieneu()
             except Exception as e:
-                print(f"[TTS Engine] Notice initializing VieNeu: {e}")
+                err_msg = str(e).lower()
+                if "escapes model directory" in err_msg or "external data path" in err_msg or "symlink" in err_msg:
+                    print("[TTS Engine] Resolving ONNX model cache layout for VieNeu...")
+                    self._fix_hf_cache_symlinks()
+                    try:
+                        self.engine = Vieneu()
+                        print("[TTS Engine] VieNeu-TTS successfully initialized after cache resolution.")
+                    except Exception as e2:
+                        print(f"[TTS Engine] Notice initializing VieNeu after relink: {e2}")
+                else:
+                    print(f"[TTS Engine] Notice initializing VieNeu: {e}")
 
     def _resolve_voice(self, name: str) -> str:
         """
@@ -168,13 +209,12 @@ class TTSEngine:
 
     def _fallback_edge_tts(self, text: str, output_path: str) -> float:
         """
-        Clean fallback using edge-tts CLI if VieNeu has an environment issue.
+        Reliable fallback using edge_tts Python API with proxy support and 48kHz stereo WAV transcoding.
         """
         clean_text = re.sub(r'\[.*?\]', '', text).strip()
         if not clean_text:
             clean_text = "..."
 
-        # Select female or male edge-tts neural voice based on preset
         female_keywords = ["dung", "anh", "huyen", "tran", "ly", "linh", "trang", "doan", "duyen", "thanh"]
         clean_voice = self._resolve_voice(self.voice_preset).lower()
 
@@ -184,27 +224,70 @@ class TTSEngine:
             voice_name = "vi-VN-NamMinhNeural"
 
         temp_mp3 = Path(output_path).with_suffix(".temp.mp3")
-        cmd = [
-            "edge-tts",
-            "--voice", voice_name,
-            "--text", clean_text,
-            "--write-media", str(temp_mp3)
-        ]
+        proxy = (
+            os.environ.get("https_proxy") or os.environ.get("http_proxy") or
+            os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or None
+        )
+
+        success = False
+
+        # Attempt A: Direct edge_tts Python library
         try:
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-            # Transcode to standard 48kHz 16-bit PCM WAV
-            trans_cmd = [
-                "ffmpeg", "-y",
-                "-i", str(temp_mp3),
-                "-ar", "48000", "-ac", "2",
-                "-c:a", "pcm_s16le",
-                str(output_path)
-            ]
-            subprocess.run(trans_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            temp_mp3.unlink(missing_ok=True)
-        except Exception as e:
-            temp_mp3.unlink(missing_ok=True)
-            print(f"[TTS Engine Notice] Edge-TTS offline or network blocked ({e}). Generating audible preview tone.")
+            import edge_tts
+            import asyncio
+
+            async def _synthesize():
+                comm = edge_tts.Communicate(clean_text, voice_name, proxy=proxy)
+                await comm.save(str(temp_mp3))
+
+            try:
+                asyncio.run(_synthesize())
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    try:
+                        import nest_asyncio
+                        nest_asyncio.apply()
+                    except ImportError:
+                        pass
+                loop.run_until_complete(_synthesize())
+
+            if temp_mp3.exists() and temp_mp3.stat().st_size > 100:
+                trans_cmd = [
+                    "ffmpeg", "-y",
+                    "-i", str(temp_mp3),
+                    "-ar", "48000", "-ac", "2",
+                    "-c:a", "pcm_s16le",
+                    str(output_path)
+                ]
+                subprocess.run(trans_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                success = True
+        except Exception as py_err:
+            # Attempt B: CLI invocation fallback
+            try:
+                cmd = [
+                    "edge-tts",
+                    "--voice", voice_name,
+                    "--text", clean_text,
+                    "--write-media", str(temp_mp3)
+                ]
+                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                trans_cmd = [
+                    "ffmpeg", "-y",
+                    "-i", str(temp_mp3),
+                    "-ar", "48000", "-ac", "2",
+                    "-c:a", "pcm_s16le",
+                    str(output_path)
+                ]
+                subprocess.run(trans_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                success = True
+            except Exception as cli_err:
+                print(f"[TTS Engine Notice] edge-tts Python ({py_err}) and CLI ({cli_err}) unavailable.")
+
+        temp_mp3.unlink(missing_ok=True)
+
+        if not success or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            print("[TTS Engine Notice] Both VieNeu and Edge-TTS unavailable (offline/blocked). Generating audible preview tone.")
             word_count = max(1, len(clean_text.split()))
             est_duration = max(3.0, word_count * 0.35)
             num_samples = int(self.sample_rate * est_duration)
@@ -212,6 +295,5 @@ class TTSEngine:
             dummy = (0.25 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
             sf.write(output_path, dummy, self.sample_rate)
 
-        # Get duration using soundfile
         info = sf.info(output_path)
         return info.duration

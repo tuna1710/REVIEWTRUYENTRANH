@@ -10,9 +10,10 @@ import os
 import sys
 import json
 import os
-for _k in ["NO_PROXY", "no_proxy"]:
-    if _k in os.environ and "::1" in os.environ[_k]:
-        os.environ[_k] = os.environ[_k].replace(",[::1]", "").replace(",::1", "").replace("[::1]", "").replace("::1", "")
+for _k in ["NO_PROXY", "no_proxy", "GLOBAL_AGENT_NO_PROXY"]:
+    if _k in os.environ:
+        parts = [p.strip() for p in os.environ[_k].split(",") if p.strip() and "::" not in p and "[" not in p]
+        os.environ[_k] = ",".join(parts)
 
 import yaml
 import shutil
@@ -21,11 +22,6 @@ from pathlib import Path
 import pandas as pd
 import gradio as gr
 from datetime import datetime
-
-# Fix httpx NO_PROXY bug with IPv6 brackets
-for _k in ["NO_PROXY", "no_proxy"]:
-    if _k in os.environ and "::1" in os.environ[_k]:
-        os.environ[_k] = os.environ[_k].replace(",[::1]", "").replace(",::1", "").replace("[::1]", "").replace("::1", "")
 
 BASE_DIR = Path(__file__).parent.resolve()
 sys.path.append(str(BASE_DIR))
@@ -104,7 +100,7 @@ def process_auto_pipeline(
         d.mkdir(parents=True, exist_ok=True)
 
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    ratio_str = "9_16" if "9:16" in aspect_choice else "16_9"
+    ratio_str = "9_16" if "9:16" in aspect_ratio else "16_9"
     final_video_path = storage_dir / f"final_recap_{timestamp_str}_{ratio_str}.mp4"
     draft_dir = storage_dir / "capcut_draft"
 
