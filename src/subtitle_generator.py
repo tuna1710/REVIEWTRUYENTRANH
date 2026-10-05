@@ -35,11 +35,15 @@ class SubtitleGenerator:
         output_dir: str = "./workspace/subtitles",
         aspect_ratio: str = "16:9"
     ):
+        self.model_size = model_size
+        self.device = device
+        self.compute_type = compute_type
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.aspect_ratio = aspect_ratio
         self.model = None
         self.clean_output_dir()
+        self._load_model()
 
     def clean_output_dir(self):
         """Cleans previous subtitle files to avoid mixing subtitles between chapters."""
@@ -53,13 +57,20 @@ class SubtitleGenerator:
                     pass
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
+    def _load_model(self):
         if HAS_WHISPER:
             try:
-                print(f"[Subtitle Engine] Loading Faster-Whisper ({model_size}) on {device}...")
-                self.model = WhisperModel(model_size, device=device, compute_type=compute_type)
+                print(f"[Subtitle Engine] Loading Faster-Whisper ({self.model_size}) on {self.device}...")
+                self.model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
             except Exception as e:
-                print(f"[Subtitle Engine] CUDA load failed ({e}), loading on CPU int8...")
-                self.model = WhisperModel(model_size, device="cpu", compute_type="int8")
+                print(f"[Subtitle Engine] Device {self.device} load failed ({e}), loading on CPU int8...")
+                try:
+                    self.model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
+                except Exception as e2:
+                    print(f"[Subtitle Engine Notice] Failed to load Faster-Whisper ({e2}). Using timing fallback.")
+                    self.model = None
+        else:
+            print("[Subtitle Engine Notice] faster-whisper not installed. Using timing fallback.")
 
     def transcribe_and_generate_sub(self, scene_id: int, audio_path: str, reference_text: str = "") -> Dict:
         """
