@@ -7,6 +7,14 @@ Leverages Qwen2.5-VL (Local 4-bit GPU on Colab) or Gemini Flash (Free Cloud API)
 """
 
 import os
+import sys
+
+# Comprehensive sanitization of NO_PROXY to prevent httpx IPv6 port parsing crash
+for _k in ["NO_PROXY", "no_proxy", "GLOBAL_AGENT_NO_PROXY"]:
+    if _k in os.environ:
+        parts = [p.strip() for p in os.environ[_k].split(",") if p.strip() and "::" not in p and "[" not in p]
+        os.environ[_k] = ",".join(parts)
+import os
 import re
 import json
 import base64
@@ -78,10 +86,11 @@ def _sanitize_vietnamese_text(text: str) -> str:
     # 1. Strip all bracket tags completely (e.g., [thở dài], [tiếng thở dốc], [hắng giọng], etc.)
     text = re.sub(r"\[[^\]]*\]", "", text)
 
-    # 2. Strip any leaked JSON key/syntax markers
+    # 2. Strip any leaked JSON key/syntax markers or trailing fields (e.g. camera_motion, sfx_cue)
+    text = re.split(r',?\s*["\']?(?:camera_motion|sfx_cue|dramatic_score|score|motion)["\']?\s*:', text)[0]
     text = re.sub(r'^\s*\{?\s*"dramatic_score"\s*:\s*\d+,?\s*', '', text)
-    text = re.sub(r'^\s*"?narration"?\s*:\s*["\']?', '', text)
-    text = re.sub(r'["\'\}]+\s*$', '', text)
+    text = re.sub(r'^\s*"narration"\s*:\s*["\']?', '', text)
+    text = re.sub(r'[\s"\'\}]+\s*$', '', text)
 
     # 3. Common Chinese leaks from Qwen visual tokenizer
     replacements = {
@@ -531,13 +540,21 @@ class ScriptGenerator:
                     except Exception:
                         pass
 
-                # If JSON was truncated or malformed, extract narration field cleanly
+                # If JSON was truncated or malformed, extract fields with robust boundary regex
                 if not narration:
-                    narr_match = re.search(r'["\']narration["\']\s*:\s*["\']([^"\'\n\r]+)', cleaned)
+                    narr_match = re.search(r'["\']narration["\']\s*:\s*["\']?(.*?)(?:,\s*["\']?(?:camera_motion|sfx_cue|dramatic_score)|\s*\}|$)', cleaned, re.DOTALL)
                     if narr_match:
                         narration = narr_match.group(1).strip()
                     else:
                         narration = cleaned
+
+                # Extract camera_motion and sfx if fallback was needed
+                if motion not in ["zoom_in", "zoom_out", "pan_left", "pan_right", "static"]:
+                    m_mot = re.search(r'["\']camera_motion["\']\s*:\s*["\']([a-zA-Z_]+)["\']', cleaned)
+                    if m_mot and m_mot.group(1).strip() in ["zoom_in", "zoom_out", "pan_left", "pan_right", "static"]:
+                        motion = m_mot.group(1).strip()
+                    else:
+                        motion = "zoom_in" if idx % 2 == 1 else "pan_left"
 
                 # Sanitize Vietnamese text: strip all brackets, JSON leaks, and duplicate words
                 narration = _sanitize_vietnamese_text(narration)

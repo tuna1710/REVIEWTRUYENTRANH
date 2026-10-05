@@ -60,14 +60,15 @@ class TTSEngine:
         Replaces cross-directory symlinks in the snapshot directory with hardlinks or copies.
         """
         try:
-            hf_cache = Path.home() / ".cache" / "huggingface" / "hub"
+            hf_home = os.environ.get("HF_HOME")
+            hf_cache = Path(hf_home) / "hub" if hf_home else Path.home() / ".cache" / "huggingface" / "hub"
             if not hf_cache.exists():
                 return
             for snap_dir in hf_cache.glob("**/snapshots/*"):
                 for p in snap_dir.rglob("*"):
                     if p.is_symlink():
                         target = p.resolve()
-                        if target.exists():
+                        if target.is_file():
                             p.unlink()
                             try:
                                 os.link(target, p)
@@ -90,11 +91,12 @@ class TTSEngine:
 
         if HAS_VIENEU:
             print("[TTS Engine] Initializing VieNeu-TTS-v3-Turbo...")
+            self._fix_hf_cache_symlinks()
             try:
                 self.engine = Vieneu()
             except Exception as e:
                 err_msg = str(e).lower()
-                if "escapes model directory" in err_msg or "external data path" in err_msg or "symlink" in err_msg:
+                if "escapes model directory" in err_msg or "external data path" in err_msg or "symlink" in err_msg or "onnx" in err_msg:
                     print("[TTS Engine] Resolving ONNX model cache layout for VieNeu...")
                     self._fix_hf_cache_symlinks()
                     try:
