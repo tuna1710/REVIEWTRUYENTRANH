@@ -11,6 +11,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Dict, Optional
+from PIL import Image
 
 
 class VideoEngine:
@@ -129,12 +130,23 @@ class VideoEngine:
             x_expr = "iw/2-(iw/zoom/2)"
             y_expr = "ih/2-(ih/zoom/2)"
 
-        # Escape path for FFmpeg subtitles filter
+        # Probe panel dimensions to preserve exact aspect ratio without distortion (Option 1)
+        try:
+            with Image.open(panel_path) as _im:
+                orig_w, orig_h = _im.size
+        except Exception:
+            orig_w, orig_h = self.width, self.height
+
+        scale_factor = min(self.width / max(1, orig_w), self.height / max(1, orig_h))
+        fg_w = max(2, int(orig_w * scale_factor) // 2 * 2)
+        fg_h = max(2, int(orig_h * scale_factor) // 2 * 2)
+
+        # Foreground zoompan preserves exact panel aspect ratio: s={fg_w}x{fg_h}
         filter_complex = (
             f"[0:v]scale={self.width}:{self.height}:force_original_aspect_ratio=increase,"
-            f"crop={self.width}:{self.height},boxblur=20:5[bg];"
-            f"[0:v]scale={self.width}:{self.height}:force_original_aspect_ratio=decrease[scaled_fg];"
-            f"[scaled_fg]zoompan=z='{zoom_expr}':d={total_frames}:x='{x_expr}':y='{y_expr}':s={self.width}x{self.height}:fps={self.fps}[fg];"
+            f"crop={self.width}:{self.height},boxblur=25:5[bg];"
+            f"[0:v]scale={fg_w}:{fg_h}[scaled_fg];"
+            f"[scaled_fg]zoompan=z='{zoom_expr}':d={total_frames}:x='{x_expr}':y='{y_expr}':s={fg_w}x{fg_h}:fps={self.fps}[fg];"
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2[base]"
         )
 
